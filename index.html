@@ -692,10 +692,11 @@
     document.getElementById('equity-range-label').textContent = `· ${label}`;
 
     renderCards(filtered);
-    renderEquityChart(filtered);
-    renderWinLossChart(filtered);
-    renderMarketPLChart(filtered);
-    renderMarketVolChart(filtered);
+    // Chaque graphique est isolé : si l'un échoue, les autres restent affichés
+    try { renderEquityChart(filtered); } catch (e) { log(`Erreur graphique performance : ${e.message}`, "#ff5c5c"); }
+    try { renderWinLossChart(filtered); } catch (e) { log(`Erreur graphique gains/pertes : ${e.message}`, "#ff5c5c"); }
+    try { renderMarketPLChart(filtered); } catch (e) { log(`Erreur graphique P&L marché : ${e.message}`, "#ff5c5c"); }
+    try { renderMarketVolChart(filtered); } catch (e) { log(`Erreur graphique volume : ${e.message}`, "#ff5c5c"); }
     renderTable(filtered);
   }
 
@@ -733,19 +734,30 @@
   function renderEquityChart(list) {
     const sorted = [...list].sort((a, b) => a.purchase_time - b.purchase_time);
     let cum = 0;
-    const points = sorted.map(t => {
+    const labels = [];
+    const data = [];
+    sorted.forEach(t => {
       cum += t.pl;
-      return { x: new Date(t.purchase_time * 1000), y: cum };
+      labels.push(new Date(t.purchase_time * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) +
+        ' ' + new Date(t.purchase_time * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
+      data.push(Number(cum.toFixed(2)));
     });
 
     destroyChart('equity');
     const ctx = document.getElementById('chart-equity');
+
+    if (data.length === 0) {
+      ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
+      return;
+    }
+
     charts.equity = new Chart(ctx, {
       type: 'line',
       data: {
+        labels,
         datasets: [{
           label: 'P/L cumulé',
-          data: points,
+          data,
           stepped: true,
           borderColor: '#ff444f',
           backgroundColor: 'rgba(255,68,79,0.12)',
@@ -756,8 +768,12 @@
       },
       options: {
         responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
         scales: {
-          x: { type: 'time', time: { unit: 'day' }, grid: { color: '#1c2027' }, ticks: { color: '#8b93a1' } },
+          x: {
+            grid: { color: '#1c2027' },
+            ticks: { color: '#8b93a1', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+          },
           y: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1' } }
         },
         plugins: { legend: { display: false } }
