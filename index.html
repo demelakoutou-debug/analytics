@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
 <style>
   :root{
     --bg:#0b0d10;
@@ -367,11 +367,24 @@
   let activeRange = '1m';
   let activeMarkets = new Set(Object.keys(STEP_MARKETS));
   let charts = {};
+  let lastWsUrl = null;
+  let keepAliveTimer = null;
+  let reconnectTimer = null;
+  let intentionalClose = false;
+  let currentAccountId = null;
 
   function log(msg, color = '#7dd3a0') {
     const time = new Date().toLocaleTimeString();
     logBox.innerHTML += `<div style="color:${color}">[${time}] ${msg}</div>`;
     logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  window.addEventListener('error', (e) => {
+    log(`Erreur script : ${e.message}`, "#ff5c5c");
+  });
+
+  if (typeof Chart === 'undefined') {
+    log("La librairie de graphiques n'a pas pu être chargée (réseau bloqué ou CDN indisponible). Les cartes chiffrées restent fonctionnelles mais les graphiques ne s'afficheront pas.", "#ff5c5c");
   }
 
   function setStatus(online, text) {
@@ -465,7 +478,9 @@
 
   // --- OTP + WebSocket ---
   async function switchAccountSession(accountId) {
+    intentionalClose = true;
     if (ws) { ws.close(); }
+    currentAccountId = accountId;
     log(`Demande d'un canal sécurisé pour le compte ${accountId}...`, "#f2b544");
 
     try {
@@ -481,6 +496,7 @@
       const wsUrl = otpData.data?.url;
       if (!wsUrl) throw new Error("Aucune URL de canal renvoyée.");
 
+      lastWsUrl = wsUrl;
       log("Canal sécurisé validé. Connexion en cours...", "#20c997");
       openAuthenticatedWebSocket(wsUrl);
     } catch (error) {
@@ -489,11 +505,24 @@
   }
 
   function openAuthenticatedWebSocket(wsUrl) {
+    intentionalClose = false;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       setStatus(true, 'Connecté');
       log("Canal WebSocket établi. Chargement de l'historique...", "#20c997");
+
+      // Garde la connexion active : Deriv coupe les canaux inactifs après un délai,
+      // un ping léger toutes les 20s évite toute déconnexion pendant la consultation.
+      if (keepAliveTimer) clearInterval(keepAliveTimer);
+      keepAliveTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ ping: 1 }));
+        }
+      }, 20000);
+
       loadFullHistory();
     };
 
@@ -514,6 +543,15 @@
 
     ws.onclose = () => {
       setStatus(false, 'Déconnecté');
+      if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+
+      // Reconnexion automatique si la coupure n'a pas été demandée (changement de compte, déconnexion volontaire)
+      if (!intentionalClose && lastWsUrl && currentAccountId) {
+        log("Connexion perdue, nouvelle tentative dans 3s...", "#f2b544");
+        reconnectTimer = setTimeout(() => {
+          switchAccountSession(currentAccountId);
+        }, 3000);
+      }
     };
   }
 
