@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Step Analytics — Suivi de Performance Deriv</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0d10;
+    --panel:#14171c;
+    --panel-2:#1b1f26;
+    --line:#262b33;
+    --text:#e9ecef;
+    --text-dim:#8b93a1;
+    --brand:#ff444f;
+    --brand-dim:#5c2226;
+    --gain:#20c997;
+    --loss:#ff5c5c;
+    --gold:#f2b544;
+    --radius:10px;
+    --font-display:'Space Grotesk',sans-serif;
+    --font-body:'Inter',sans-serif;
+    --font-mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+
+  /* ---------- Topbar ---------- */
+  .topbar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 24px;
+    background:linear-gradient(180deg,#101318,#0e1116);
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap;
+    gap:12px;
+  }
+  .brand{display:flex;align-items:center;gap:12px;}
+  .brand .stepmark{display:flex;align-items:flex-end;gap:3px;height:26px;}
+  .brand .stepmark span{
+    display:block;width:6px;background:var(--brand);border-radius:2px 2px 0 0;
+  }
+  .brand .stepmark span:nth-child(1){height:8px;}
+  .brand .stepmark span:nth-child(2){height:14px;}
+  .brand .stepmark span:nth-child(3){height:20px;}
+  .brand .stepmark span:nth-child(4){height:26px;background:var(--gold);}
+  .brand h1{
+    font-family:var(--font-display);
+    font-size:19px;letter-spacing:0.5px;margin:0;font-weight:700;
+  }
+  .brand p{margin:0;font-size:11.5px;color:var(--text-dim);letter-spacing:0.3px;}
+
+  .topbar-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .status-pill{
+    display:flex;align-items:center;gap:7px;
+    font-size:12.5px;font-family:var(--font-mono);
+    padding:6px 12px;border-radius:20px;background:var(--panel-2);
+    border:1px solid var(--line);
+  }
+  .status-dot{width:8px;height:8px;border-radius:50%;background:var(--loss);}
+  .status-dot.on{background:var(--gain);box-shadow:0 0 8px var(--gain);}
+
+  select, button{
+    font-family:var(--font-body);
+    font-size:13.5px;
+  }
+  #account-select{
+    background:var(--panel-2);color:var(--text);border:1px solid var(--line);
+    padding:8px 12px;border-radius:8px;min-width:210px;
+  }
+  .btn{
+    background:var(--brand);color:#fff;border:none;
+    padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;
+    transition:background .15s ease, transform .1s ease;
+  }
+  .btn:hover{background:#e23540;}
+  .btn:active{transform:scale(.97);}
+  .btn-ghost{
+    background:transparent;color:var(--text-dim);border:1px solid var(--line);
+  }
+  .btn-ghost:hover{color:var(--text);border-color:#3a4150;}
+
+  /* ---------- Filter bar ---------- */
+  .filter-bar{
+    display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+    padding:14px 24px;background:var(--panel);border-bottom:1px solid var(--line);
+  }
+  .filter-group{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .filter-label{
+    font-size:11px;text-transform:uppercase;letter-spacing:1px;
+    color:var(--text-dim);font-weight:600;white-space:nowrap;
+  }
+  /* Segmented "staircase" control for date ranges — each step wider & taller than the last */
+  .steps{display:flex;align-items:flex-end;gap:3px;}
+  .steps button{
+    appearance:none;border:1px solid var(--line);background:var(--panel-2);
+    color:var(--text-dim);cursor:pointer;font-family:var(--font-mono);
+    font-size:11.5px;border-radius:6px 6px 0 0;
+    padding:6px 10px;transition:all .15s ease;
+  }
+  .steps button:nth-child(1){height:26px;}
+  .steps button:nth-child(2){height:30px;}
+  .steps button:nth-child(3){height:34px;}
+  .steps button:nth-child(4){height:38px;}
+  .steps button:nth-child(5){height:42px;}
+  .steps button:nth-child(6){height:46px;}
+  .steps button:nth-child(7){height:50px;}
+  .steps button:hover{color:var(--text);}
+  .steps button.active{
+    background:var(--brand);color:#fff;border-color:var(--brand);
+  }
+
+  .chip{
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  }
+  .chip button{
+    appearance:none;border:1px solid var(--line);background:var(--panel-2);
+    color:var(--text-dim);cursor:pointer;border-radius:20px;
+    padding:6px 14px;font-size:12.5px;font-weight:500;transition:all .15s ease;
+  }
+  .chip button.active{
+    background:var(--brand-dim);color:var(--brand);border-color:var(--brand);
+  }
+
+  .btn-refresh{margin-left:auto;}
+
+  /* ---------- Main ---------- */
+  main{flex:1;padding:22px 24px 40px;max-width:1500px;width:100%;margin:0 auto;}
+
+  .empty-state{
+    text-align:center;padding:100px 20px;color:var(--text-dim);
+  }
+  .empty-state .stepmark-lg span{display:inline-block;width:14px;margin:0 3px;background:var(--line);border-radius:3px 3px 0 0;vertical-align:bottom;}
+  .empty-state .stepmark-lg{margin-bottom:22px;}
+  .empty-state h2{font-family:var(--font-display);color:var(--text);font-size:22px;margin:0 0 8px;}
+  .empty-state p{font-size:14px;margin:0 0 22px;}
+
+  .cards-grid{
+    display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:20px;
+  }
+  @media (max-width:1100px){.cards-grid{grid-template-columns:repeat(3,1fr);}}
+  @media (max-width:640px){.cards-grid{grid-template-columns:repeat(2,1fr);}}
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px;
+  }
+  .card .label{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;}
+  .card .value{font-family:var(--font-mono);font-size:22px;font-weight:600;}
+  .card .value.gain{color:var(--gain);}
+  .card .value.loss{color:var(--loss);}
+
+  .charts-grid{
+    display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:20px;
+  }
+  @media (max-width:1000px){.charts-grid{grid-template-columns:1fr;}}
+  .panel{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;
+  }
+  .panel h3{
+    font-family:var(--font-display);font-size:14.5px;margin:0 0 14px;
+    display:flex;align-items:center;justify-content:space-between;
+    color:var(--text);
+  }
+  .panel h3 span{font-size:11px;color:var(--text-dim);font-weight:400;font-family:var(--font-body);}
+  .chart-box{position:relative;height:260px;}
+  .charts-grid-2{
+    display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;
+  }
+  @media (max-width:1000px){.charts-grid-2{grid-template-columns:1fr;}}
+
+  /* ---------- Table ---------- */
+  .table-panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;}
+  .table-head-row{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 18px;border-bottom:1px solid var(--line);
+  }
+  .table-head-row h3{margin:0;font-family:var(--font-display);font-size:14.5px;}
+  .table-wrap{max-height:480px;overflow:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{
+    position:sticky;top:0;background:var(--panel-2);color:var(--text-dim);
+    text-align:left;padding:10px 14px;font-size:11px;text-transform:uppercase;
+    letter-spacing:0.5px;border-bottom:1px solid var(--line);white-space:nowrap;
+  }
+  tbody td{
+    padding:10px 14px;border-bottom:1px solid #1c2027;font-family:var(--font-mono);
+    white-space:nowrap;
+  }
+  tbody tr:hover{background:#181c22;}
+  .tag{
+    display:inline-block;padding:2px 8px;border-radius:5px;font-size:11px;
+    font-family:var(--font-body);font-weight:600;
+  }
+  .tag.rise{background:#123626;color:var(--gain);}
+  .tag.fall{background:#3a1414;color:var(--loss);}
+  .pl.gain{color:var(--gain);}
+  .pl.loss{color:var(--loss);}
+
+  /* ---------- Log ---------- */
+  #log-box{
+    background:#000;color:#7dd3a0;font-family:var(--font-mono);font-size:11.5px;
+    padding:10px 14px;max-height:110px;overflow-y:auto;border-top:1px solid var(--line);
+  }
+  #log-box div{padding:1px 0;}
+  footer{padding:0;}
+
+  .loader{
+    display:inline-block;width:14px;height:14px;border:2px solid var(--line);
+    border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="stepmark"><span></span><span></span><span></span><span></span></div>
+    <div>
+      <h1>Step Analytics</h1>
+      <p>Suivi de performance — Step Index 100 · 200 · 300 · 400 · 500</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="status-pill"><span class="status-dot" id="status-dot"></span><span id="status-text">Déconnecté</span></div>
+    <select id="account-select" style="display:none;"></select>
+    <button id="auth-btn" class="btn">Se connecter avec Deriv</button>
+    <button id="logout-btn" class="btn btn-ghost" style="display:none;">Déconnexion</button>
+  </div>
+</div>
+
+<div class="filter-bar" id="filter-bar" style="display:none;">
+  <div class="filter-group">
+    <span class="filter-label">Période</span>
+    <div class="steps" id="range-steps">
+      <button data-range="today">Jour</button>
+      <button data-range="yesterday">Hier</button>
+      <button data-range="7d">7j</button>
+      <button data-range="15d">15j</button>
+      <button data-range="1m" class="active">1 mois</button>
+      <button data-range="3m">3 mois</button>
+      <button data-range="6m">6 mois</button>
+    </div>
+  </div>
+  <div class="filter-group">
+    <span class="filter-label">Marché</span>
+    <div class="chip" id="market-chips">
+      <button data-market="STPRNG" class="active">Step 100</button>
+      <button data-market="STPRNG2" class="active">Step 200</button>
+      <button data-market="STPRNG3" class="active">Step 300</button>
+      <button data-market="STPRNG4" class="active">Step 400</button>
+      <button data-market="STPRNG5" class="active">Step 500</button>
+    </div>
+  </div>
+  <button class="btn btn-ghost btn-refresh" id="refresh-btn">↻ Actualiser</button>
+</div>
+
+<main>
+  <div class="empty-state" id="empty-state">
+    <div class="stepmark-lg">
+      <span style="height:16px;"></span><span style="height:26px;"></span><span style="height:36px;"></span><span style="height:46px;background:var(--brand);"></span>
+    </div>
+    <h2>Connectez votre compte Deriv</h2>
+    <p>Autorisez l'accès pour charger l'historique complet de vos trades Step Index et visualiser vos performances.</p>
+    <button class="btn" id="auth-btn-2">Se connecter avec Deriv</button>
+  </div>
+
+  <div id="dashboard" style="display:none;">
+    <div class="cards-grid" id="cards-grid"></div>
+
+    <div class="charts-grid">
+      <div class="panel">
+        <h3>Courbe de performance cumulée <span id="equity-range-label"></span></h3>
+        <div class="chart-box"><canvas id="chart-equity"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3>Répartition Gains / Pertes</h3>
+        <div class="chart-box"><canvas id="chart-winloss"></canvas></div>
+      </div>
+    </div>
+
+    <div class="charts-grid-2">
+      <div class="panel">
+        <h3>P&L par marché</h3>
+        <div class="chart-box"><canvas id="chart-market-pl"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3>Volume de trades par marché</h3>
+        <div class="chart-box"><canvas id="chart-market-vol"></canvas></div>
+      </div>
+    </div>
+
+    <div class="table-panel">
+      <div class="table-head-row">
+        <h3>Historique détaillé</h3>
+        <span class="filter-label" id="table-count">0 trades</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date d'achat</th>
+              <th>Marché</th>
+              <th>Type</th>
+              <th>Durée</th>
+              <th>Mise</th>
+              <th>Sortie</th>
+              <th>P/L</th>
+            </tr>
+          </thead>
+          <tbody id="trades-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="log-box">Initialisation du système d'analyse...</div>
+
+<script>
+  const CLIENT_ID = '33x2j6gNVVRZ7SA4iDxDv';
+  const REDIRECT_URI = 'https://demelakoutou-debug.github.io/tieapp/';
+
+  // Marchés Step Index exclusivement pris en charge
+  const STEP_MARKETS = {
+    'STPRNG':  { label: 'Step 100', color: '#ff444f' },
+    'STPRNG2': { label: 'Step 200', color: '#f2b544' },
+    'STPRNG3': { label: 'Step 300', color: '#20c997' },
+    'STPRNG4': { label: 'Step 400', color: '#4dabf7' },
+    'STPRNG5': { label: 'Step 500', color: '#b197fc' }
+  };
+
+  const authBtn = document.getElementById('auth-btn');
+  const authBtn2 = document.getElementById('auth-btn-2');
+  const logoutBtn = document.getElementById('logout-btn');
+  const accountSelect = document.getElementById('account-select');
+  const statusDot = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+  const logBox = document.getElementById('log-box');
+  const filterBar = document.getElementById('filter-bar');
+  const emptyState = document.getElementById('empty-state');
+  const dashboard = document.getElementById('dashboard');
+  const rangeSteps = document.getElementById('range-steps');
+  const marketChips = document.getElementById('market-chips');
+  const refreshBtn = document.getElementById('refresh-btn');
+
+  let ws = null;
+  let accessToken = null;
+  let reqCounter = 1;
+  let pendingRequests = {};
+  let allTransactions = [];   // historique complet (déjà filtré aux marchés Step)
+  let activeRange = '1m';
+  let activeMarkets = new Set(Object.keys(STEP_MARKETS));
+  let charts = {};
+
+  function log(msg, color = '#7dd3a0') {
+    const time = new Date().toLocaleTimeString();
+    logBox.innerHTML += `<div style="color:${color}">[${time}] ${msg}</div>`;
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  function setStatus(online, text) {
+    statusDot.className = 'status-dot' + (online ? ' on' : '');
+    statusText.textContent = text;
+  }
+
+  // --- PKCE ---
+  function generateRandomString(length) {
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    let text = '';
+    for (let i = 0; i < length; i++) text += possible.charAt(Math.floor(Math.random() * possible.length));
+    return text;
+  }
+
+  async function generateCodeChallenge(codeVerifier) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(codeVerifier);
+    const digest = await window.crypto.subtle.digest('SHA-256', data);
+    return btoa(String.fromCharCode(...new Uint8Array(digest)))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  async function startLogin() {
+    const state = generateRandomString(16);
+    const codeVerifier = generateRandomString(64);
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+    sessionStorage.setItem('oauth_state', state);
+    sessionStorage.setItem('oauth_verifier', codeVerifier);
+
+    const scope = 'read';
+    const oauthUrl = `https://auth.deriv.com/oauth2/auth` +
+      `?response_type=code` +
+      `&client_id=${CLIENT_ID}` +
+      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+      `&scope=${scope}` +
+      `&state=${state}` +
+      `&code_challenge=${codeChallenge}` +
+      `&code_challenge_method=S256`;
+
+    log("Redirection vers la mire d'autorisation Deriv...", "#f2b544");
+    window.location.href = oauthUrl;
+  }
+
+  authBtn.addEventListener('click', startLogin);
+  authBtn2.addEventListener('click', startLogin);
+
+  logoutBtn.addEventListener('click', () => {
+    sessionStorage.clear();
+    localStorage.clear();
+    window.location.href = REDIRECT_URI;
+  });
+
+  // --- Comptes ---
+  async function fetchDerivAccounts() {
+    log("Récupération de vos comptes de trading...", "#f2b544");
+    try {
+      const response = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Deriv-App-ID': CLIENT_ID }
+      });
+      if (!response.ok) throw new Error(`Erreur HTTP : ${response.status}`);
+
+      const json = await response.json();
+      const accounts = json.data || [];
+      accountSelect.innerHTML = "";
+
+      if (accounts.length === 0) {
+        log("Aucun compte trouvé sur ce profil.", "#f2b544");
+        return;
+      }
+
+      accounts.forEach(acc => {
+        const option = document.createElement('option');
+        option.value = acc.account_id;
+        let label = acc.account_type === 'demo' ? "Démo (DOT)" : "Réel (ROT)";
+        option.text = `${label} - ${acc.account_id} (${acc.currency || 'USD'})`;
+        accountSelect.appendChild(option);
+      });
+
+      accountSelect.style.display = 'inline-block';
+
+      if (accountSelect.value) switchAccountSession(accountSelect.value);
+    } catch (error) {
+      log(`Impossible de récupérer vos comptes : ${error.message}`, "#ff5c5c");
+    }
+  }
+
+  accountSelect.addEventListener('change', (e) => switchAccountSession(e.target.value));
+
+  // --- OTP + WebSocket ---
+  async function switchAccountSession(accountId) {
+    if (ws) { ws.close(); }
+    log(`Demande d'un canal sécurisé pour le compte ${accountId}...`, "#f2b544");
+
+    try {
+      const response = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Deriv-App-ID': CLIENT_ID }
+      });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `Erreur HTTP ${response.status}`);
+      }
+      const otpData = await response.json();
+      const wsUrl = otpData.data?.url;
+      if (!wsUrl) throw new Error("Aucune URL de canal renvoyée.");
+
+      log("Canal sécurisé validé. Connexion en cours...", "#20c997");
+      openAuthenticatedWebSocket(wsUrl);
+    } catch (error) {
+      log(`Échec de connexion : ${error.message}`, "#ff5c5c");
+    }
+  }
+
+  function openAuthenticatedWebSocket(wsUrl) {
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      setStatus(true, 'Connecté');
+      log("Canal WebSocket établi. Chargement de l'historique...", "#20c997");
+      loadFullHistory();
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.req_id && pendingRequests[data.req_id]) {
+        const { resolve, reject } = pendingRequests[data.req_id];
+        delete pendingRequests[data.req_id];
+        if (data.error) reject(new Error(data.error.message));
+        else resolve(data);
+      }
+    };
+
+    ws.onerror = () => {
+      // Silencieux : les erreurs de transport n'interrompent pas l'expérience utilisateur
+    };
+
+    ws.onclose = () => {
+      setStatus(false, 'Déconnecté');
+    };
+  }
+
+  function sendRequest(payload) {
+    return new Promise((resolve, reject) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error("Connexion non disponible"));
+        return;
+      }
+      const req_id = reqCounter++;
+      pendingRequests[req_id] = { resolve, reject };
+      ws.send(JSON.stringify({ ...payload, req_id }));
+
+      setTimeout(() => {
+        if (pendingRequests[req_id]) {
+          delete pendingRequests[req_id];
+          reject(new Error("Délai d'attente dépassé"));
+        }
+      }, 15000);
+    });
+  }
+
+  // --- Récupération complète de l'historique (profit_table paginé) ---
+  async function loadFullHistory() {
+    allTransactions = [];
+    let offset = 0;
+    const limit = 50;
+    let keepGoing = true;
+    let pageCount = 0;
+    const MAX_PAGES = 200; // garde-fou
+
+    filterBar.style.display = 'none';
+    emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique de trades...</p>`;
+    emptyState.style.display = 'block';
+    dashboard.style.display = 'none';
+
+    try {
+      while (keepGoing && pageCount < MAX_PAGES) {
+        const res = await sendRequest({
+          profit_table: 1,
+          description: 1,
+          sort: 'DESC',
+          limit: limit,
+          offset: offset
+        });
+
+        const txs = (res.profit_table && res.profit_table.transactions) || [];
+        for (const t of txs) {
+          const symbol = extractSymbol(t.shortcode);
+          if (symbol && STEP_MARKETS[symbol]) {
+            allTransactions.push(normalizeTransaction(t, symbol));
+          }
+        }
+
+        pageCount++;
+        offset += limit;
+        keepGoing = txs.length === limit;
+      }
+
+      log(`Historique chargé : ${allTransactions.length} trades Step Index détectés.`, "#20c997");
+      filterBar.style.display = 'flex';
+      renderDashboard();
+    } catch (error) {
+      log(`Chargement partiel de l'historique : ${error.message}`, "#f2b544");
+      if (allTransactions.length > 0) {
+        filterBar.style.display = 'flex';
+        renderDashboard();
+      } else {
+        emptyState.innerHTML = `<h2>Aucune donnée disponible</h2><p>Réessayez l'actualisation dans quelques instants.</p><button class="btn" id="retry-btn">↻ Réessayer</button>`;
+        document.getElementById('retry-btn').addEventListener('click', loadFullHistory);
+      }
+    }
+  }
+
+  function extractSymbol(shortcode) {
+    if (!shortcode) return null;
+    const parts = shortcode.split('_');
+    return parts.length > 1 ? parts[1].toUpperCase() : null;
+  }
+
+  function normalizeTransaction(t, symbol) {
+    const buyPrice = parseFloat(t.buy_price || 0);
+    const sellPrice = t.sell_price !== undefined && t.sell_price !== null ? parseFloat(t.sell_price) : null;
+    const pl = sellPrice !== null ? sellPrice - buyPrice : 0;
+    const isCall = /^(CALL|CALLE)/.test(t.shortcode || '') || /call/i.test(t.longcode || '');
+    return {
+      contract_id: t.contract_id,
+      symbol,
+      purchase_time: t.purchase_time,
+      sell_time: t.sell_time,
+      buy_price: buyPrice,
+      sell_price: sellPrice,
+      payout: parseFloat(t.payout || 0),
+      pl,
+      direction: isCall ? 'rise' : 'fall',
+      longcode: t.longcode || ''
+    };
+  }
+
+  // --- Filtres de période ---
+  function getRangeBounds(range) {
+    const now = new Date();
+    const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000;
+    const endOfDay = (d) => startOfDay(d) + 86400;
+
+    switch (range) {
+      case 'today':
+        return { from: startOfDay(now), to: endOfDay(now), label: "Aujourd'hui" };
+      case 'yesterday': {
+        const y = new Date(now); y.setDate(y.getDate() - 1);
+        return { from: startOfDay(y), to: endOfDay(y), label: "Hier" };
+      }
+      case '7d':
+        return { from: startOfDay(now) - 7 * 86400, to: endOfDay(now), label: "7 derniers jours" };
+      case '15d':
+        return { from: startOfDay(now) - 15 * 86400, to: endOfDay(now), label: "15 derniers jours" };
+      case '1m': {
+        const m = new Date(now); m.setMonth(m.getMonth() - 1);
+        return { from: startOfDay(m), to: endOfDay(now), label: "Dernier mois" };
+      }
+      case '3m': {
+        const m = new Date(now); m.setMonth(m.getMonth() - 3);
+        return { from: startOfDay(m), to: endOfDay(now), label: "3 derniers mois" };
+      }
+      case '6m': {
+        const m = new Date(now); m.setMonth(m.getMonth() - 6);
+        return { from: startOfDay(m), to: endOfDay(now), label: "6 derniers mois" };
+      }
+      default:
+        return { from: 0, to: endOfDay(now), label: "Tout" };
+    }
+  }
+
+  rangeSteps.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-range]');
+    if (!btn) return;
+    activeRange = btn.dataset.range;
+    [...rangeSteps.children].forEach(b => b.classList.toggle('active', b === btn));
+    renderDashboard();
+  });
+
+  marketChips.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-market]');
+    if (!btn) return;
+    const m = btn.dataset.market;
+    if (activeMarkets.has(m)) {
+      if (activeMarkets.size === 1) return; // au moins un marché actif
+      activeMarkets.delete(m);
+      btn.classList.remove('active');
+    } else {
+      activeMarkets.add(m);
+      btn.classList.add('active');
+    }
+    renderDashboard();
+  });
+
+  refreshBtn.addEventListener('click', loadFullHistory);
+
+  // --- Rendu du dashboard ---
+  function renderDashboard() {
+    if (allTransactions.length === 0) {
+      emptyState.innerHTML = `<h2>Aucun trade Step Index trouvé</h2><p>Aucune transaction sur Step 100 à 500 n'a été détectée sur ce compte.</p>`;
+      emptyState.style.display = 'block';
+      dashboard.style.display = 'none';
+      return;
+    }
+
+    const { from, to, label } = getRangeBounds(activeRange);
+    const filtered = allTransactions.filter(t =>
+      activeMarkets.has(t.symbol) &&
+      t.purchase_time >= from && t.purchase_time < to
+    );
+
+    emptyState.style.display = 'none';
+    dashboard.style.display = 'block';
+    document.getElementById('equity-range-label').textContent = `· ${label}`;
+
+    renderCards(filtered);
+    renderEquityChart(filtered);
+    renderWinLossChart(filtered);
+    renderMarketPLChart(filtered);
+    renderMarketVolChart(filtered);
+    renderTable(filtered);
+  }
+
+  function renderCards(list) {
+    const total = list.length;
+    const wins = list.filter(t => t.pl > 0).length;
+    const losses = list.filter(t => t.pl <= 0).length;
+    const totalPL = list.reduce((s, t) => s + t.pl, 0);
+    const avgStake = total ? list.reduce((s, t) => s + t.buy_price, 0) / total : 0;
+    const best = total ? Math.max(...list.map(t => t.pl)) : 0;
+    const worst = total ? Math.min(...list.map(t => t.pl)) : 0;
+    const winRate = total ? (wins / total * 100) : 0;
+
+    const cards = [
+      { label: 'Total Trades', value: total, cls: '' },
+      { label: 'Taux de réussite', value: winRate.toFixed(1) + '%', cls: winRate >= 50 ? 'gain' : 'loss' },
+      { label: 'P/L Total', value: (totalPL >= 0 ? '+' : '') + totalPL.toFixed(2) + '$', cls: totalPL >= 0 ? 'gain' : 'loss' },
+      { label: 'Mise Moyenne', value: avgStake.toFixed(2) + '$', cls: '' },
+      { label: 'Meilleur Trade', value: '+' + best.toFixed(2) + '$', cls: 'gain' },
+      { label: 'Pire Trade', value: worst.toFixed(2) + '$', cls: 'loss' }
+    ];
+
+    document.getElementById('cards-grid').innerHTML = cards.map(c => `
+      <div class="card">
+        <div class="label">${c.label}</div>
+        <div class="value ${c.cls}">${c.value}</div>
+      </div>
+    `).join('');
+  }
+
+  function destroyChart(key) {
+    if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+  }
+
+  function renderEquityChart(list) {
+    const sorted = [...list].sort((a, b) => a.purchase_time - b.purchase_time);
+    let cum = 0;
+    const points = sorted.map(t => {
+      cum += t.pl;
+      return { x: new Date(t.purchase_time * 1000), y: cum };
+    });
+
+    destroyChart('equity');
+    const ctx = document.getElementById('chart-equity');
+    charts.equity = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [{
+          label: 'P/L cumulé',
+          data: points,
+          stepped: true,
+          borderColor: '#ff444f',
+          backgroundColor: 'rgba(255,68,79,0.12)',
+          fill: true,
+          pointRadius: 0,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { type: 'time', time: { unit: 'day' }, grid: { color: '#1c2027' }, ticks: { color: '#8b93a1' } },
+          y: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  function renderWinLossChart(list) {
+    const wins = list.filter(t => t.pl > 0).length;
+    const losses = list.length - wins;
+    destroyChart('winloss');
+    charts.winloss = new Chart(document.getElementById('chart-winloss'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Gagnants', 'Perdants'],
+        datasets: [{ data: [wins, losses], backgroundColor: ['#20c997', '#ff5c5c'], borderWidth: 0 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { color: '#e9ecef' } } }
+      }
+    });
+  }
+
+  function renderMarketPLChart(list) {
+    const keys = Object.keys(STEP_MARKETS);
+    const pl = keys.map(k => list.filter(t => t.symbol === k).reduce((s, t) => s + t.pl, 0));
+    destroyChart('marketpl');
+    charts.marketpl = new Chart(document.getElementById('chart-market-pl'), {
+      type: 'bar',
+      data: {
+        labels: keys.map(k => STEP_MARKETS[k].label),
+        datasets: [{
+          data: pl,
+          backgroundColor: pl.map(v => v >= 0 ? '#20c997' : '#ff5c5c'),
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#8b93a1' } },
+          y: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  function renderMarketVolChart(list) {
+    const keys = Object.keys(STEP_MARKETS);
+    const vol = keys.map(k => list.filter(t => t.symbol === k).length);
+    destroyChart('marketvol');
+    charts.marketvol = new Chart(document.getElementById('chart-market-vol'), {
+      type: 'bar',
+      data: {
+        labels: keys.map(k => STEP_MARKETS[k].label),
+        datasets: [{ data: vol, backgroundColor: keys.map(k => STEP_MARKETS[k].color), borderRadius: 4 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        scales: {
+          x: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1' } },
+          y: { grid: { display: false }, ticks: { color: '#8b93a1' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  function renderTable(list) {
+    const sorted = [...list].sort((a, b) => b.purchase_time - a.purchase_time);
+    document.getElementById('table-count').textContent = `${sorted.length} trades`;
+    document.getElementById('trades-tbody').innerHTML = sorted.map(t => {
+      const date = new Date(t.purchase_time * 1000).toLocaleString('fr-FR');
+      const durationSec = t.sell_time ? (t.sell_time - t.purchase_time) : null;
+      const durationLabel = durationSec !== null ? (durationSec < 60 ? `${durationSec}s` : `${Math.round(durationSec/60)}min`) : '—';
+      const plClass = t.pl >= 0 ? 'gain' : 'loss';
+      const plLabel = (t.pl >= 0 ? '+' : '') + t.pl.toFixed(2) + '$';
+      return `
+        <tr>
+          <td>${date}</td>
+          <td>${STEP_MARKETS[t.symbol]?.label || t.symbol}</td>
+          <td><span class="tag ${t.direction}">${t.direction === 'rise' ? '▲ Rise' : '▼ Fall'}</span></td>
+          <td>${durationLabel}</td>
+          <td>${t.buy_price.toFixed(2)}$</td>
+          <td>${t.sell_price !== null ? t.sell_price.toFixed(2) + '$' : '—'}</td>
+          <td class="pl ${plClass}">${plLabel}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // --- Initialisation système / retour OAuth ---
+  async function initApp() {
+    logBox.innerHTML = "";
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const state = urlParams.get('state');
+
+    if (code && state) {
+      const savedState = sessionStorage.getItem('oauth_state');
+      if (state !== savedState) {
+        log("Échec : le paramètre state ne correspond pas.", "#ff5c5c");
+        return;
+      }
+
+      log("Code reçu. Échange contre un token d'accès...", "#f2b544");
+      try {
+        const resp = await fetch('https://auth.deriv.com/oauth2/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: CLIENT_ID,
+            code: code,
+            code_verifier: sessionStorage.getItem('oauth_verifier'),
+            redirect_uri: REDIRECT_URI
+          })
+        });
+
+        if (!resp.ok) throw new Error("Échec du serveur d'authentification.");
+
+        const tok = await resp.json();
+        if (tok.access_token) {
+          log("Authentification réussie.", "#20c997");
+          localStorage.setItem('access_token', tok.access_token);
+          localStorage.setItem('is_logged', 'true');
+        }
+      } catch (err) {
+        log(`Erreur lors de l'échange de token : ${err.message}`, "#ff5c5c");
+      }
+      window.history.replaceState({}, document.title, REDIRECT_URI);
+    }
+
+    if (localStorage.getItem('is_logged') === 'true') {
+      accessToken = localStorage.getItem('access_token');
+      authBtn.style.display = 'none';
+      authBtn2.style.display = 'none';
+      logoutBtn.style.display = 'inline-block';
+      fetchDerivAccounts();
+    } else {
+      log("Prêt. Veuillez vous connecter pour charger vos analytics.", "#e9ecef");
+    }
+  }
+
+  initApp();
+</script>
+</body>
+</html>
