@@ -21,6 +21,8 @@
     --gain:#20c997;
     --loss:#ff5c5c;
     --gold:#f2b544;
+    --silver:#c7cdd6;
+    --bronze:#d08a52;
     --radius:10px;
     --font-display:'Space Grotesk',sans-serif;
     --font-body:'Inter',sans-serif;
@@ -174,7 +176,7 @@
   .panel h3{
     font-family:var(--font-display);font-size:14.5px;margin:0 0 14px;
     display:flex;align-items:center;justify-content:space-between;
-    color:var(--text);
+    color:var(--text);flex-wrap:wrap;gap:10px;
   }
   .panel h3 span{font-size:11px;color:var(--text-dim);font-weight:400;font-family:var(--font-body);}
   .chart-box{position:relative;height:260px;}
@@ -211,13 +213,33 @@
   .pl.gain{color:var(--gain);}
   .pl.loss{color:var(--loss);}
 
+  /* ---------- Rankings page ---------- */
+  .rank-row{
+    display:grid;grid-template-columns:36px 1fr 120px 90px;align-items:center;gap:14px;
+    padding:10px 4px;border-bottom:1px solid #1c2027;
+  }
+  .rank-row:last-child{border-bottom:none;}
+  .rank-badge{
+    width:30px;height:30px;border-radius:50%;background:var(--panel-2);
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono);font-weight:700;font-size:13px;color:var(--text-dim);
+    border:1px solid var(--line);
+  }
+  .rank-row:nth-child(1) .rank-badge{background:var(--gold);color:#1a1400;border-color:var(--gold);}
+  .rank-row:nth-child(2) .rank-badge{background:var(--silver);color:#1a1a1a;border-color:var(--silver);}
+  .rank-row:nth-child(3) .rank-badge{background:var(--bronze);color:#1a0f00;border-color:var(--bronze);}
+  .rank-date{font-weight:600;font-size:13.5px;text-transform:capitalize;}
+  .rank-sub{font-size:11.5px;color:var(--text-dim);font-family:var(--font-mono);margin-top:2px;}
+  .rank-bar-wrap{height:6px;background:#1c2027;border-radius:4px;overflow:hidden;}
+  .rank-bar{height:100%;border-radius:4px;}
+  .rank-value{font-family:var(--font-mono);font-weight:700;font-size:14px;text-align:right;}
+
   /* ---------- Log ---------- */
   #log-box{
     background:#000;color:#7dd3a0;font-family:var(--font-mono);font-size:11.5px;
     padding:10px 14px;max-height:110px;overflow-y:auto;border-top:1px solid var(--line);
   }
   #log-box div{padding:1px 0;}
-  footer{padding:0;}
 
   .loader{
     display:inline-block;width:14px;height:14px;border:2px solid var(--line);
@@ -239,96 +261,128 @@
   <div class="topbar-right">
     <div class="status-pill"><span class="status-dot" id="status-dot"></span><span id="status-text">Déconnecté</span></div>
     <select id="account-select" style="display:none;"></select>
+    <button id="rankings-btn" class="btn btn-ghost" style="display:none;">🏆 Classements</button>
     <button id="auth-btn" class="btn">Se connecter avec Deriv</button>
     <button id="logout-btn" class="btn btn-ghost" style="display:none;">Déconnexion</button>
   </div>
 </div>
 
-<div class="filter-bar" id="filter-bar" style="display:none;">
-  <div class="filter-group">
-    <span class="filter-label">Période</span>
-    <div class="steps" id="range-steps">
-      <button data-range="today">Jour</button>
-      <button data-range="yesterday">Hier</button>
-      <button data-range="7d">7j</button>
-      <button data-range="15d">15j</button>
-      <button data-range="1m" class="active">1 mois</button>
-      <button data-range="3m">3 mois</button>
-      <button data-range="6m">6 mois</button>
+<div id="view-dashboard">
+  <div class="filter-bar" id="filter-bar" style="display:none;">
+    <div class="filter-group">
+      <span class="filter-label">Période</span>
+      <div class="steps" id="range-steps">
+        <button data-range="today">Jour</button>
+        <button data-range="yesterday">Hier</button>
+        <button data-range="7d">7j</button>
+        <button data-range="15d">15j</button>
+        <button data-range="1m" class="active">1 mois</button>
+        <button data-range="3m">3 mois</button>
+        <button data-range="6m">6 mois</button>
+      </div>
     </div>
-  </div>
-  <div class="filter-group">
-    <span class="filter-label">Marché</span>
-    <div class="chip" id="market-chips">
-      <button data-market="STPRNG" class="active">Step 100</button>
-      <button data-market="STPRNG2" class="active">Step 200</button>
-      <button data-market="STPRNG3" class="active">Step 300</button>
-      <button data-market="STPRNG4" class="active">Step 400</button>
-      <button data-market="STPRNG5" class="active">Step 500</button>
+    <div class="filter-group">
+      <span class="filter-label">Marché</span>
+      <div class="chip" id="market-chips">
+        <button data-market="STPRNG" class="active">Step 100</button>
+        <button data-market="STPRNG2" class="active">Step 200</button>
+        <button data-market="STPRNG3" class="active">Step 300</button>
+        <button data-market="STPRNG4" class="active">Step 400</button>
+        <button data-market="STPRNG5" class="active">Step 500</button>
+      </div>
     </div>
+    <button class="btn btn-ghost btn-refresh" id="refresh-btn">↻ Actualiser</button>
   </div>
-  <button class="btn btn-ghost btn-refresh" id="refresh-btn">↻ Actualiser</button>
+
+  <main>
+    <div class="empty-state" id="empty-state">
+      <div class="stepmark-lg">
+        <span style="height:16px;"></span><span style="height:26px;"></span><span style="height:36px;"></span><span style="height:46px;background:var(--brand);"></span>
+      </div>
+      <h2>Connectez votre compte Deriv</h2>
+      <p>Autorisez l'accès pour charger l'historique complet de vos trades Step Index et visualiser vos performances.</p>
+      <button class="btn" id="auth-btn-2">Se connecter avec Deriv</button>
+    </div>
+
+    <div id="dashboard" style="display:none;">
+      <div class="cards-grid" id="cards-grid"></div>
+
+      <div class="charts-grid">
+        <div class="panel">
+          <h3>Courbe de performance cumulée <span id="equity-range-label"></span></h3>
+          <div class="chart-box"><canvas id="chart-equity"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>Répartition Gains / Pertes</h3>
+          <div class="chart-box"><canvas id="chart-winloss"></canvas></div>
+        </div>
+      </div>
+
+      <div class="charts-grid-2">
+        <div class="panel">
+          <h3>P&L par marché</h3>
+          <div class="chart-box"><canvas id="chart-market-pl"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>Volume de trades par marché</h3>
+          <div class="chart-box"><canvas id="chart-market-vol"></canvas></div>
+        </div>
+      </div>
+
+      <div class="table-panel">
+        <div class="table-head-row">
+          <h3>Historique détaillé</h3>
+          <span class="filter-label" id="table-count">0 trades</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date d'achat</th>
+                <th>Marché</th>
+                <th>Type</th>
+                <th>Durée</th>
+                <th>Mise</th>
+                <th>Sortie</th>
+                <th>P/L</th>
+              </tr>
+            </thead>
+            <tbody id="trades-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
 </div>
 
-<main>
-  <div class="empty-state" id="empty-state">
-    <div class="stepmark-lg">
-      <span style="height:16px;"></span><span style="height:26px;"></span><span style="height:36px;"></span><span style="height:46px;background:var(--brand);"></span>
-    </div>
-    <h2>Connectez votre compte Deriv</h2>
-    <p>Autorisez l'accès pour charger l'historique complet de vos trades Step Index et visualiser vos performances.</p>
-    <button class="btn" id="auth-btn-2">Se connecter avec Deriv</button>
+<div id="view-rankings" style="display:none;">
+  <div class="filter-bar">
+    <button class="btn btn-ghost" id="back-to-dashboard-btn">← Retour au tableau de bord</button>
+    <span class="filter-label" style="margin-left:6px;">Classement basé sur tout l'historique chargé, marchés Step sélectionnés dans le tableau de bord</span>
   </div>
-
-  <div id="dashboard" style="display:none;">
-    <div class="cards-grid" id="cards-grid"></div>
-
-    <div class="charts-grid">
+  <main>
+    <div class="charts-grid" style="grid-template-columns:1fr 1fr;">
       <div class="panel">
-        <h3>Courbe de performance cumulée <span id="equity-range-label"></span></h3>
-        <div class="chart-box"><canvas id="chart-equity"></canvas></div>
+        <h3>🏆 Meilleurs Jours
+          <div class="chip" id="days-metric-toggle">
+            <button data-metric="pl" class="active">Gains cumulés</button>
+            <button data-metric="winrate">Winrate</button>
+          </div>
+        </h3>
+        <div id="ranking-days-list"></div>
       </div>
       <div class="panel">
-        <h3>Répartition Gains / Pertes</h3>
-        <div class="chart-box"><canvas id="chart-winloss"></canvas></div>
+        <h3>🏆 Meilleurs Mois
+          <div class="chip" id="months-metric-toggle">
+            <button data-metric="pl" class="active">Gains cumulés</button>
+            <button data-metric="winrate">Winrate</button>
+          </div>
+        </h3>
+        <div id="ranking-months-list"></div>
       </div>
     </div>
-
-    <div class="charts-grid-2">
-      <div class="panel">
-        <h3>P&L par marché</h3>
-        <div class="chart-box"><canvas id="chart-market-pl"></canvas></div>
-      </div>
-      <div class="panel">
-        <h3>Volume de trades par marché</h3>
-        <div class="chart-box"><canvas id="chart-market-vol"></canvas></div>
-      </div>
-    </div>
-
-    <div class="table-panel">
-      <div class="table-head-row">
-        <h3>Historique détaillé</h3>
-        <span class="filter-label" id="table-count">0 trades</span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Date d'achat</th>
-              <th>Marché</th>
-              <th>Type</th>
-              <th>Durée</th>
-              <th>Mise</th>
-              <th>Sortie</th>
-              <th>P/L</th>
-            </tr>
-          </thead>
-          <tbody id="trades-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</main>
+  </main>
+</div>
 
 <div id="log-box">Initialisation du système d'analyse...</div>
 
@@ -358,6 +412,12 @@
   const rangeSteps = document.getElementById('range-steps');
   const marketChips = document.getElementById('market-chips');
   const refreshBtn = document.getElementById('refresh-btn');
+  const rankingsBtn = document.getElementById('rankings-btn');
+  const backToDashboardBtn = document.getElementById('back-to-dashboard-btn');
+  const viewDashboard = document.getElementById('view-dashboard');
+  const viewRankings = document.getElementById('view-rankings');
+  const daysMetricToggle = document.getElementById('days-metric-toggle');
+  const monthsMetricToggle = document.getElementById('months-metric-toggle');
 
   let ws = null;
   let accessToken = null;
@@ -372,6 +432,8 @@
   let reconnectTimer = null;
   let intentionalClose = false;
   let currentAccountId = null;
+  let daysMetric = 'pl';
+  let monthsMetric = 'pl';
 
   function log(msg, color = '#7dd3a0') {
     const time = new Date().toLocaleTimeString();
@@ -434,6 +496,7 @@
   authBtn2.addEventListener('click', startLogin);
 
   logoutBtn.addEventListener('click', () => {
+    intentionalClose = true;
     sessionStorage.clear();
     localStorage.clear();
     window.location.href = REDIRECT_URI;
@@ -584,6 +647,7 @@
     const MAX_PAGES = 200; // garde-fou
 
     filterBar.style.display = 'none';
+    rankingsBtn.style.display = 'none';
     emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique de trades...</p>`;
     emptyState.style.display = 'block';
     dashboard.style.display = 'none';
@@ -613,11 +677,13 @@
 
       log(`Historique chargé : ${allTransactions.length} trades Step Index détectés.`, "#20c997");
       filterBar.style.display = 'flex';
+      rankingsBtn.style.display = 'inline-block';
       renderDashboard();
     } catch (error) {
       log(`Chargement partiel de l'historique : ${error.message}`, "#f2b544");
       if (allTransactions.length > 0) {
         filterBar.style.display = 'flex';
+        rankingsBtn.style.display = 'inline-block';
         renderDashboard();
       } else {
         emptyState.innerHTML = `<h2>Aucune donnée disponible</h2><p>Réessayez l'actualisation dans quelques instants.</p><button class="btn" id="retry-btn">↻ Réessayer</button>`;
@@ -651,7 +717,7 @@
     };
   }
 
-  // --- Filtres de période ---
+  // --- Filtres de période (tableau de bord) ---
   function getRangeBounds(range) {
     const now = new Date();
     const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000;
@@ -706,9 +772,38 @@
       btn.classList.add('active');
     }
     renderDashboard();
+    if (viewRankings.style.display === 'block') renderRankings();
   });
 
   refreshBtn.addEventListener('click', loadFullHistory);
+
+  // --- Navigation entre les deux pages internes (dashboard / classements) ---
+  rankingsBtn.addEventListener('click', () => {
+    viewDashboard.style.display = 'none';
+    viewRankings.style.display = 'block';
+    renderRankings();
+  });
+
+  backToDashboardBtn.addEventListener('click', () => {
+    viewRankings.style.display = 'none';
+    viewDashboard.style.display = 'block';
+  });
+
+  daysMetricToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-metric]');
+    if (!btn) return;
+    daysMetric = btn.dataset.metric;
+    [...daysMetricToggle.children].forEach(b => b.classList.toggle('active', b === btn));
+    renderRankings();
+  });
+
+  monthsMetricToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-metric]');
+    if (!btn) return;
+    monthsMetric = btn.dataset.metric;
+    [...monthsMetricToggle.children].forEach(b => b.classList.toggle('active', b === btn));
+    renderRankings();
+  });
 
   // --- Rendu du dashboard ---
   function renderDashboard() {
@@ -741,7 +836,6 @@
   function renderCards(list) {
     const total = list.length;
     const wins = list.filter(t => t.pl > 0).length;
-    const losses = list.filter(t => t.pl <= 0).length;
     const totalPL = list.reduce((s, t) => s + t.pl, 0);
     const avgStake = total ? list.reduce((s, t) => s + t.buy_price, 0) / total : 0;
     const best = total ? Math.max(...list.map(t => t.pl)) : 0;
@@ -903,6 +997,77 @@
         </tr>
       `;
     }).join('');
+  }
+
+  // --- Page Classements : agrégation par jour et par mois ---
+  function dayKeyISO(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function monthKeyISO(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+
+  function aggregateByKey(list, keyFn, labelFn) {
+    const map = {};
+    list.forEach(t => {
+      const date = new Date(t.purchase_time * 1000);
+      const key = keyFn(date);
+      if (!map[key]) map[key] = { key, label: labelFn(date), trades: 0, wins: 0, pl: 0 };
+      map[key].trades++;
+      if (t.pl > 0) map[key].wins++;
+      map[key].pl += t.pl;
+    });
+    return Object.values(map).map(g => ({ ...g, winrate: g.trades ? (g.wins / g.trades * 100) : 0 }));
+  }
+
+  function renderRankingList(containerId, groups, metric) {
+    const sorted = [...groups].sort((a, b) => metric === 'winrate' ? b.winrate - a.winrate : b.pl - a.pl).slice(0, 10);
+    const el = document.getElementById(containerId);
+
+    if (sorted.length === 0) {
+      el.innerHTML = `<p style="color:var(--text-dim); padding:16px 4px;">Pas encore assez de données pour établir un classement.</p>`;
+      return;
+    }
+
+    const maxAbs = Math.max(...sorted.map(g => Math.abs(g.pl)), 1);
+
+    el.innerHTML = sorted.map((g, i) => {
+      const barPct = metric === 'winrate' ? g.winrate : (Math.abs(g.pl) / maxAbs * 100);
+      const barColor = metric === 'winrate' ? (g.winrate >= 50 ? 'var(--gain)' : 'var(--loss)') : (g.pl >= 0 ? 'var(--gain)' : 'var(--loss)');
+      const mainLabel = metric === 'winrate' ? g.winrate.toFixed(1) + '%' : (g.pl >= 0 ? '+' : '') + g.pl.toFixed(2) + '$';
+      const subLabel = metric === 'winrate'
+        ? `${g.trades} trades · ${(g.pl >= 0 ? '+' : '') + g.pl.toFixed(2)}$`
+        : `${g.trades} trades · ${g.winrate.toFixed(1)}% winrate`;
+      return `
+        <div class="rank-row">
+          <div class="rank-badge">${i + 1}</div>
+          <div>
+            <div class="rank-date">${g.label}</div>
+            <div class="rank-sub">${subLabel}</div>
+          </div>
+          <div class="rank-bar-wrap"><div class="rank-bar" style="width:${barPct}%; background:${barColor};"></div></div>
+          <div class="rank-value" style="color:${barColor};">${mainLabel}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderRankings() {
+    const filtered = allTransactions.filter(t => activeMarkets.has(t.symbol));
+
+    const days = aggregateByKey(
+      filtered,
+      d => dayKeyISO(d),
+      d => d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
+    );
+    const months = aggregateByKey(
+      filtered,
+      d => monthKeyISO(d),
+      d => d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    );
+
+    renderRankingList('ranking-days-list', days, daysMetric);
+    renderRankingList('ranking-months-list', months, monthsMetric);
   }
 
   // --- Initialisation système / retour OAuth ---
