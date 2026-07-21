@@ -42,7 +42,6 @@
   ::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;}
   ::-webkit-scrollbar-track{background:transparent;}
 
-  /* ---------- Topbar ---------- */
   .topbar{
     display:flex;align-items:center;justify-content:space-between;
     padding:14px 24px;
@@ -96,7 +95,6 @@
   }
   .btn-ghost:hover{color:var(--text);border-color:#3a4150;}
 
-  /* ---------- Filter bar ---------- */
   .filter-bar{
     display:flex;align-items:center;gap:20px;flex-wrap:wrap;
     padding:14px 24px;background:var(--panel);border-bottom:1px solid var(--line);
@@ -106,7 +104,6 @@
     font-size:11px;text-transform:uppercase;letter-spacing:1px;
     color:var(--text-dim);font-weight:600;white-space:nowrap;
   }
-  /* Segmented "staircase" control for date ranges — each step wider & taller than the last */
   .steps{display:flex;align-items:flex-end;gap:3px;}
   .steps button{
     appearance:none;border:1px solid var(--line);background:var(--panel-2);
@@ -140,7 +137,6 @@
 
   .btn-refresh{margin-left:auto;}
 
-  /* ---------- Main ---------- */
   main{flex:1;padding:22px 24px 40px;max-width:1500px;width:100%;margin:0 auto;}
 
   .empty-state{
@@ -174,18 +170,18 @@
     padding:18px;
   }
   .panel h3{
-    font-family:var(--font-display);font-size:14.5px;margin:0 0 14px;
+    font-family:var(--font-display);font-size:14.5px;margin:0 0 4px;
     display:flex;align-items:center;justify-content:space-between;
     color:var(--text);flex-wrap:wrap;gap:10px;
   }
   .panel h3 span{font-size:11px;color:var(--text-dim);font-weight:400;font-family:var(--font-body);}
+  .panel .panel-note{font-size:11px;color:var(--text-dim);margin:0 0 14px;}
   .chart-box{position:relative;height:260px;}
   .charts-grid-2{
     display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;
   }
   @media (max-width:1000px){.charts-grid-2{grid-template-columns:1fr;}}
 
-  /* ---------- Table ---------- */
   .table-panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;}
   .table-head-row{
     display:flex;align-items:center;justify-content:space-between;
@@ -213,7 +209,6 @@
   .pl.gain{color:var(--gain);}
   .pl.loss{color:var(--loss);}
 
-  /* ---------- Rankings page ---------- */
   .rank-row{
     display:grid;grid-template-columns:36px 1fr 120px 90px;align-items:center;gap:14px;
     padding:10px 4px;border-bottom:1px solid #1c2027;
@@ -234,7 +229,6 @@
   .rank-bar{height:100%;border-radius:4px;}
   .rank-value{font-family:var(--font-mono);font-weight:700;font-size:14px;text-align:right;}
 
-  /* ---------- Log ---------- */
   #log-box{
     background:#000;color:#7dd3a0;font-family:var(--font-mono);font-size:11.5px;
     padding:10px 14px;max-height:110px;overflow-y:auto;border-top:1px solid var(--line);
@@ -369,6 +363,7 @@
             <button data-metric="winrate">Winrate</button>
           </div>
         </h3>
+        <p class="panel-note" id="days-note">Classé par gains cumulés sur la journée</p>
         <div id="ranking-days-list"></div>
       </div>
       <div class="panel">
@@ -378,6 +373,7 @@
             <button data-metric="winrate">Winrate</button>
           </div>
         </h3>
+        <p class="panel-note" id="months-note">Classé par gains cumulés sur le mois</p>
         <div id="ranking-months-list"></div>
       </div>
     </div>
@@ -390,7 +386,6 @@
   const CLIENT_ID = '33x2j6gNVVRZ7SA4iDxDv';
   const REDIRECT_URI = 'https://demelakoutou-debug.github.io/analytics/';
 
-  // Marchés Step Index exclusivement pris en charge
   const STEP_MARKETS = {
     'STPRNG':  { label: 'Step 100', color: '#ff444f' },
     'STPRNG2': { label: 'Step 200', color: '#f2b544' },
@@ -398,6 +393,8 @@
     'STPRNG4': { label: 'Step 400', color: '#4dabf7' },
     'STPRNG5': { label: 'Step 500', color: '#b197fc' }
   };
+
+  const MIN_TRADES_FOR_WINRATE = 3;
 
   const authBtn = document.getElementById('auth-btn');
   const authBtn2 = document.getElementById('auth-btn-2');
@@ -418,12 +415,14 @@
   const viewRankings = document.getElementById('view-rankings');
   const daysMetricToggle = document.getElementById('days-metric-toggle');
   const monthsMetricToggle = document.getElementById('months-metric-toggle');
+  const daysNote = document.getElementById('days-note');
+  const monthsNote = document.getElementById('months-note');
 
   let ws = null;
   let accessToken = null;
   let reqCounter = 1;
   let pendingRequests = {};
-  let allTransactions = [];   // historique complet (déjà filtré aux marchés Step)
+  let allTransactions = [];
   let activeRange = '1m';
   let activeMarkets = new Set(Object.keys(STEP_MARKETS));
   let charts = {};
@@ -454,7 +453,6 @@
     statusText.textContent = text;
   }
 
-  // --- PKCE ---
   function generateRandomString(length) {
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
     let text = '';
@@ -502,7 +500,6 @@
     window.location.href = REDIRECT_URI;
   });
 
-  // --- Comptes ---
   async function fetchDerivAccounts() {
     log("Récupération de vos comptes de trading...", "#f2b544");
     try {
@@ -539,7 +536,6 @@
 
   accountSelect.addEventListener('change', (e) => switchAccountSession(e.target.value));
 
-  // --- OTP + WebSocket ---
   async function switchAccountSession(accountId) {
     intentionalClose = true;
     if (ws) { ws.close(); }
@@ -577,8 +573,6 @@
       setStatus(true, 'Connecté');
       log("Canal WebSocket établi. Chargement de l'historique...", "#20c997");
 
-      // Garde la connexion active : Deriv coupe les canaux inactifs après un délai,
-      // un ping léger toutes les 20s évite toute déconnexion pendant la consultation.
       if (keepAliveTimer) clearInterval(keepAliveTimer);
       keepAliveTimer = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -600,15 +594,12 @@
       }
     };
 
-    ws.onerror = () => {
-      // Silencieux : les erreurs de transport n'interrompent pas l'expérience utilisateur
-    };
+    ws.onerror = () => {};
 
     ws.onclose = () => {
       setStatus(false, 'Déconnecté');
       if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
 
-      // Reconnexion automatique si la coupure n'a pas été demandée (changement de compte, déconnexion volontaire)
       if (!intentionalClose && lastWsUrl && currentAccountId) {
         log("Connexion perdue, nouvelle tentative dans 3s...", "#f2b544");
         reconnectTimer = setTimeout(() => {
@@ -637,14 +628,13 @@
     });
   }
 
-  // --- Récupération complète de l'historique (profit_table paginé) ---
   async function loadFullHistory() {
     allTransactions = [];
     let offset = 0;
     const limit = 50;
     let keepGoing = true;
     let pageCount = 0;
-    const MAX_PAGES = 200; // garde-fou
+    const MAX_PAGES = 200;
 
     filterBar.style.display = 'none';
     rankingsBtn.style.display = 'none';
@@ -717,7 +707,6 @@
     };
   }
 
-  // --- Filtres de période (tableau de bord) ---
   function getRangeBounds(range) {
     const now = new Date();
     const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000;
@@ -764,7 +753,7 @@
     if (!btn) return;
     const m = btn.dataset.market;
     if (activeMarkets.has(m)) {
-      if (activeMarkets.size === 1) return; // au moins un marché actif
+      if (activeMarkets.size === 1) return;
       activeMarkets.delete(m);
       btn.classList.remove('active');
     } else {
@@ -777,7 +766,6 @@
 
   refreshBtn.addEventListener('click', loadFullHistory);
 
-  // --- Navigation entre les deux pages internes (dashboard / classements) ---
   rankingsBtn.addEventListener('click', () => {
     viewDashboard.style.display = 'none';
     viewRankings.style.display = 'block';
@@ -794,6 +782,9 @@
     if (!btn) return;
     daysMetric = btn.dataset.metric;
     [...daysMetricToggle.children].forEach(b => b.classList.toggle('active', b === btn));
+    daysNote.textContent = daysMetric === 'winrate'
+      ? `Classé par winrate sur la journée (minimum ${MIN_TRADES_FOR_WINRATE} trades pour figurer au classement)`
+      : 'Classé par gains cumulés sur la journée';
     renderRankings();
   });
 
@@ -802,10 +793,12 @@
     if (!btn) return;
     monthsMetric = btn.dataset.metric;
     [...monthsMetricToggle.children].forEach(b => b.classList.toggle('active', b === btn));
+    monthsNote.textContent = monthsMetric === 'winrate'
+      ? `Classé par winrate sur le mois (minimum ${MIN_TRADES_FOR_WINRATE} trades pour figurer au classement)`
+      : 'Classé par gains cumulés sur le mois';
     renderRankings();
   });
 
-  // --- Rendu du dashboard ---
   function renderDashboard() {
     if (allTransactions.length === 0) {
       emptyState.innerHTML = `<h2>Aucun trade Step Index trouvé</h2><p>Aucune transaction sur Step 100 à 500 n'a été détectée sur ce compte.</p>`;
@@ -825,7 +818,6 @@
     document.getElementById('equity-range-label').textContent = `· ${label}`;
 
     renderCards(filtered);
-    // Chaque graphique est isolé : si l'un échoue, les autres restent affichés
     try { renderEquityChart(filtered); } catch (e) { log(`Erreur graphique performance : ${e.message}`, "#ff5c5c"); }
     try { renderWinLossChart(filtered); } catch (e) { log(`Erreur graphique gains/pertes : ${e.message}`, "#ff5c5c"); }
     try { renderMarketPLChart(filtered); } catch (e) { log(`Erreur graphique P&L marché : ${e.message}`, "#ff5c5c"); }
@@ -999,7 +991,6 @@
     }).join('');
   }
 
-  // --- Page Classements : agrégation par jour et par mois ---
   function dayKeyISO(d) {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
@@ -1021,8 +1012,21 @@
   }
 
   function renderRankingList(containerId, groups, metric) {
-    const sorted = [...groups].sort((a, b) => metric === 'winrate' ? b.winrate - a.winrate : b.pl - a.pl).slice(0, 10);
     const el = document.getElementById(containerId);
+    let pool = groups;
+
+    if (metric === 'winrate') {
+      const qualifying = groups.filter(g => g.trades >= MIN_TRADES_FOR_WINRATE);
+      pool = qualifying.length > 0 ? qualifying : groups;
+    }
+
+    const sorted = [...pool].sort((a, b) => {
+      if (metric === 'winrate') {
+        if (b.winrate !== a.winrate) return b.winrate - a.winrate;
+        return b.trades - a.trades;
+      }
+      return b.pl - a.pl;
+    }).slice(0, 10);
 
     if (sorted.length === 0) {
       el.innerHTML = `<p style="color:var(--text-dim); padding:16px 4px;">Pas encore assez de données pour établir un classement.</p>`;
@@ -1070,7 +1074,6 @@
     renderRankingList('ranking-months-list', months, monthsMetric);
   }
 
-  // --- Initialisation système / retour OAuth ---
   async function initApp() {
     logBox.innerHTML = "";
     const urlParams = new URLSearchParams(window.location.search);
