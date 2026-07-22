@@ -619,6 +619,13 @@
       setStatus(false, 'Déconnecté');
       if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
 
+      // Libère immédiatement toute requête en attente au lieu de la laisser expirer après 15s,
+      // pour que la logique de reprise de pagination puisse réagir tout de suite.
+      Object.keys(pendingRequests).forEach(id => {
+        pendingRequests[id].reject(new Error("Connexion fermée"));
+        delete pendingRequests[id];
+      });
+
       // Reconnexion automatique si la coupure n'a pas été demandée (changement de compte, déconnexion volontaire)
       if (!intentionalClose && lastWsUrl && currentAccountId) {
         log("Connexion perdue, nouvelle tentative dans 3s...", "#f2b544");
@@ -648,6 +655,28 @@
     });
   }
 
+  // Récupère une page de profit_table avec réessais automatiques : si la connexion tombe
+  // ou qu'une requête échoue en cours de pagination, on attend que la reconnexion se fasse
+  // puis on retente la même page au lieu d'abandonner l'historique déjà collecté.
+  async function fetchProfitTablePage(offset, limit, retriesLeft = 5) {
+    try {
+      return await sendRequest({ profit_table: 1, description: 1, sort: 'DESC', limit, offset });
+    } catch (err) {
+      if (retriesLeft <= 0) throw err;
+
+      log(`Page ${offset / limit + 1} : nouvelle tentative (${err.message})...`, "#f2b544");
+
+      // Attendre que le canal soit de nouveau ouvert (la reconnexion automatique peut prendre quelques secondes)
+      let waited = 0;
+      while ((!ws || ws.readyState !== WebSocket.OPEN) && waited < 10000) {
+        await new Promise(r => setTimeout(r, 400));
+        waited += 400;
+      }
+      await new Promise(r => setTimeout(r, 600));
+      return fetchProfitTablePage(offset, limit, retriesLeft - 1);
+    }
+  }
+
   // --- Récupération complète de l'historique (profit_table paginé) ---
   async function loadFullHistory() {
     allTransactions = [];
@@ -665,13 +694,7 @@
 
     try {
       while (keepGoing && pageCount < MAX_PAGES) {
-        const res = await sendRequest({
-          profit_table: 1,
-          description: 1,
-          sort: 'DESC',
-          limit: limit,
-          offset: offset
-        });
+        const res = await fetchProfitTablePage(offset, limit);
 
         const txs = (res.profit_table && res.profit_table.transactions) || [];
         for (const t of txs) {
@@ -684,6 +707,9 @@
         pageCount++;
         offset += limit;
         keepGoing = txs.length === limit;
+
+        // Petite pause entre chaque page pour rester loin de toute limite de débit de l'API
+        if (keepGoing) await new Promise(r => setTimeout(r, 150));
       }
 
       log(`Historique chargé : ${allTransactions.length} trades Step Index détectés.`, "#20c997");
