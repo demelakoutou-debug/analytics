@@ -708,8 +708,11 @@
         offset += limit;
         keepGoing = txs.length === limit;
 
-        // Petite pause entre chaque page pour rester loin de toute limite de débit de l'API
-        if (keepGoing) await new Promise(r => setTimeout(r, 150));
+        if (keepGoing) {
+          emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique... ${allTransactions.length} trades Step Index trouvés jusqu'ici</p>`;
+          // Petite pause entre chaque page pour rester loin de toute limite de débit de l'API
+          await new Promise(r => setTimeout(r, 150));
+        }
       }
 
       log(`Historique chargé : ${allTransactions.length} trades Step Index détectés.`, "#20c997");
