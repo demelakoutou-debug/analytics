@@ -680,9 +680,10 @@
   // --- Récupération complète de l'historique (profit_table paginé) ---
   async function loadFullHistory() {
     allTransactions = [];
-    let offset = 0;
     const limit = 50;
-    let keepGoing = true;
+    const BATCH_SIZE = 5; // pages envoyées en parallèle sur le même canal WebSocket
+    let offset = 0;
+    let reachedEnd = false;
     let pageCount = 0;
     const MAX_PAGES = 200; // garde-fou
 
@@ -693,23 +694,32 @@
     dashboard.style.display = 'none';
 
     try {
-      while (keepGoing && pageCount < MAX_PAGES) {
-        const res = await fetchProfitTablePage(offset, limit);
-
-        const txs = (res.profit_table && res.profit_table.transactions) || [];
-        for (const t of txs) {
-          const symbol = extractSymbol(t.shortcode);
-          if (symbol && STEP_MARKETS[symbol]) {
-            allTransactions.push(normalizeTransaction(t, symbol));
-          }
+      while (!reachedEnd && pageCount < MAX_PAGES) {
+        const batchOffsets = [];
+        for (let i = 0; i < BATCH_SIZE && pageCount + i < MAX_PAGES; i++) {
+          batchOffsets.push(offset + i * limit);
         }
 
-        pageCount++;
-        offset += limit;
-        keepGoing = txs.length === limit;
+        const results = await Promise.all(batchOffsets.map(o => fetchProfitTablePage(o, limit)));
 
-        // Petite pause entre chaque page pour rester loin de toute limite de débit de l'API
-        if (keepGoing) await new Promise(r => setTimeout(r, 150));
+        for (const res of results) {
+          const txs = (res.profit_table && res.profit_table.transactions) || [];
+          for (const t of txs) {
+            const symbol = extractSymbol(t.shortcode);
+            if (symbol && STEP_MARKETS[symbol]) {
+              allTransactions.push(normalizeTransaction(t, symbol));
+            }
+          }
+          pageCount++;
+          if (txs.length < limit) reachedEnd = true; // page incomplète = fin de l'historique atteinte
+        }
+
+        offset += BATCH_SIZE * limit;
+
+        if (!reachedEnd) {
+          emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique... ${allTransactions.length} trades Step Index trouvés jusqu'ici</p>`;
+          await new Promise(r => setTimeout(r, 120)); // courte pause entre les lots, pas entre chaque page
+        }
       }
 
       log(`Historique chargé : ${allTransactions.length} trades Step Index détectés.`, "#20c997");
