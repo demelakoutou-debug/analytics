@@ -672,7 +672,15 @@
   // Récupère une page de profit_table avec réessais automatiques
   async function fetchProfitTablePage(offset, limit, retriesLeft = 12) {
     try {
-      return await sendRequest({ profit_table: 1, description: 1, sort: 'DESC', limit, offset });
+      return await sendRequest({
+        profit_table: 1,
+        description: 1,
+        sort: 'DESC',
+        limit,
+        offset,
+        date_from: 0,                          // depuis l'origine (aucune fenêtre implicite)
+        date_to: Math.floor(Date.now() / 1000)  // jusqu'à maintenant
+      });
     } catch (err) {
       if (retriesLeft <= 0) throw err;
 
