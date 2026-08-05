@@ -393,8 +393,20 @@
 <div id="log-box">Initialisation du système d'analyse...</div>
 
 <script>
-  const CLIENT_ID = '341Og8eukTLz8l0xzYFva';
-  const REDIRECT_URI = 'https://demelakoutou-debug.github.io/analytics/';
+  const CHART_WS_URL = "wss://ws.derivws.com/websockets/v3?app_id=1089";
+let wsChart = null;
+let chart = null;
+let currentSymbol = "stpRNG5";
+const RIGHT_PAD = 30, VIEW_WINDOW = 180;
+let ticksData = { times:[], prices:[], highs:[], lows:[] };
+let showSAR=true, showFractal=true, showLevels=true, showST=true;
+let sessionHigh=null, sessionLow=null;
+let lastFractalPeaks = { up:[], down:[] };
+let durType = 't';
+let allowEqual = false;
+
+  const CLIENT_ID = '341Og8eukTLz8l0xzYFva'
+  const REDIRECT_URI = 'https://demelakoutou-debug.github.io/analytics/'
 
   // Marchés Step Index exclusivement pris en charge
   const STEP_MARKETS = {
