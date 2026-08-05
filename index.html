@@ -528,7 +528,12 @@
         method: 'GET',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Deriv-App-ID': CLIENT_ID }
       });
-      if (!response.ok) throw new Error(`Erreur HTTP : ${response.status}`);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        let errDetail = errText;
+        try { const parsed = JSON.parse(errText); errDetail = parsed.error?.message || parsed.message || errText; } catch (e) {}
+        throw new Error(`Erreur HTTP ${response.status}${errDetail ? ' — ' + errDetail : ''}`);
+      }
 
       const json = await response.json();
       const accounts = json.data || [];
