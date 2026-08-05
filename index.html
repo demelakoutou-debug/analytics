@@ -120,6 +120,7 @@
   .steps button:nth-child(5){height:42px;}
   .steps button:nth-child(6){height:46px;}
   .steps button:nth-child(7){height:50px;}
+  .steps button:nth-child(8){height:54px;}
   .steps button:hover{color:var(--text);}
   .steps button.active{
     background:var(--brand);color:#fff;border-color:var(--brand);
@@ -280,6 +281,7 @@
         <button data-range="1m" class="active">1 mois</button>
         <button data-range="3m">3 mois</button>
         <button data-range="6m">6 mois</button>
+        <button data-range="all">Tout</button>
       </div>
     </div>
     <div class="filter-group">
@@ -796,6 +798,8 @@
         const m = new Date(now); m.setMonth(m.getMonth() - 6);
         return { from: startOfDay(m), to: endOfDay(now), label: "6 derniers mois" };
       }
+      case 'all':
+        return { from: 0, to: endOfDay(now), label: "Tout l'historique" };
       default:
         return { from: 0, to: endOfDay(now), label: "Tout" };
     }
