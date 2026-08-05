@@ -495,12 +495,10 @@
       sessionStorage.setItem('oauth_state', state);
       sessionStorage.setItem('oauth_verifier', codeVerifier);
 
-      const scope = 'read';
       const oauthUrl = `https://auth.deriv.com/oauth2/auth` +
         `?response_type=code` +
         `&client_id=${CLIENT_ID}` +
         `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-        `&scope=${scope}` +
         `&state=${state}` +
         `&code_challenge=${codeChallenge}` +
         `&code_challenge_method=S256`;
