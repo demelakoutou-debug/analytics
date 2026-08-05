@@ -308,6 +308,7 @@
     </div>
 
     <div id="dashboard" style="display:none;">
+      <div id="partial-load-banner" style="display:none; background:#3a2a10; border:1px solid var(--gold); color:var(--gold); padding:10px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;"></div>
       <div class="cards-grid" id="cards-grid"></div>
 
       <div class="charts-grid">
@@ -364,6 +365,7 @@
     <span class="filter-label" style="margin-left:6px;">Classement basé sur tout l'historique chargé, marchés Step sélectionnés dans le tableau de bord</span>
   </div>
   <main>
+    <div id="partial-load-banner-rankings" style="display:none; background:#3a2a10; border:1px solid var(--gold); color:var(--gold); padding:10px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;"></div>
     <div class="charts-grid" style="grid-template-columns:1fr 1fr;">
       <div class="panel">
         <h3>🏆 Meilleurs Jours
@@ -443,6 +445,8 @@
   let intentionalClose = false;
   let currentAccountId = null;
   let daysMetric = 'pl';
+  let historyIsPartial = false;
+  let historyPartialReason = '';
   let monthsMetric = 'pl';
 
   function log(msg, color = '#7dd3a0') {
@@ -666,7 +670,7 @@
   }
 
   // Récupère une page de profit_table avec réessais automatiques
-  async function fetchProfitTablePage(offset, limit, retriesLeft = 5) {
+  async function fetchProfitTablePage(offset, limit, retriesLeft = 12) {
     try {
       return await sendRequest({ profit_table: 1, description: 1, sort: 'DESC', limit, offset });
     } catch (err) {
@@ -728,12 +732,20 @@
         const newest = new Date(Math.max(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
         log(`Plage couverte : du ${oldest} au ${newest}.`, "#8b93a1");
       }
+      historyIsPartial = false;
+      historyPartialReason = '';
       filterBar.style.display = 'flex';
       rankingsBtn.style.display = 'inline-block';
       renderDashboard();
     } catch (error) {
       log(`Chargement partiel de l'historique : ${error.message}`, "#f2b544");
+      historyIsPartial = true;
+      historyPartialReason = error.message;
       if (allTransactions.length > 0) {
+        const times = allTransactions.map(t => t.purchase_time);
+        const oldest = new Date(Math.min(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+        const newest = new Date(Math.max(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+        log(`Données partielles couvrant : du ${oldest} au ${newest} — le chargement a été interrompu avant d'atteindre le reste de l'historique.`, "#f2b544");
         filterBar.style.display = 'flex';
         rankingsBtn.style.display = 'inline-block';
         renderDashboard();
@@ -876,6 +888,14 @@
     emptyState.style.display = 'none';
     dashboard.style.display = 'block';
     document.getElementById('equity-range-label').textContent = `· ${label}`;
+
+    const banner = document.getElementById('partial-load-banner');
+    if (historyIsPartial) {
+      banner.style.display = 'block';
+      banner.textContent = `⚠ Historique incomplet : le chargement s'est interrompu (${historyPartialReason}). Certains trades plus anciens peuvent manquer — clique sur "↻ Actualiser" pour réessayer.`;
+    } else {
+      banner.style.display = 'none';
+    }
 
     renderCards(filtered);
     try { renderEquityChart(filtered); } catch (e) { log(`Erreur graphique performance : ${e.message}`, "#ff5c5c"); }
@@ -1137,6 +1157,14 @@
   }
 
   function renderRankings() {
+    const banner = document.getElementById('partial-load-banner-rankings');
+    if (historyIsPartial) {
+      banner.style.display = 'block';
+      banner.textContent = `⚠ Historique incomplet : le chargement s'est interrompu (${historyPartialReason}). Ce classement peut manquer des mois entiers — retourne au tableau de bord et clique sur "↻ Actualiser".`;
+    } else {
+      banner.style.display = 'none';
+    }
+
     const filtered = allTransactions.filter(t => activeMarkets.has(t.symbol));
 
     const days = aggregateByKey(
