@@ -106,6 +106,7 @@
     font-size:11px;text-transform:uppercase;letter-spacing:1px;
     color:var(--text-dim);font-weight:600;white-space:nowrap;
   }
+  /* Segmented "staircase" control for date ranges — each step wider & taller than the last */
   .steps{display:flex;align-items:flex-end;gap:3px;}
   .steps button{
     appearance:none;border:1px solid var(--line);background:var(--panel-2);
@@ -405,6 +406,8 @@
   };
 
   // Nombre minimum de trades requis pour qu'une journée entre dans le classement Winrate.
+  // Sans ce filtre, une journée avec 1 seul trade gagnant affiche 100% et écrase les
+  // journées à fort volume mais légèrement moins parfaites, ce qui fausse le classement.
   const MIN_TRADES_FOR_WINRATE = 3;
 
   const authBtn = document.getElementById('auth-btn');
@@ -431,7 +434,7 @@
   let accessToken = null;
   let reqCounter = 1;
   let pendingRequests = {};
-  let allTransactions = [];
+  let allTransactions = [];   // historique complet (déjà filtré aux marchés Step)
   let activeRange = '1m';
   let activeMarkets = new Set(Object.keys(STEP_MARKETS));
   let charts = {};
@@ -451,10 +454,6 @@
 
   window.addEventListener('error', (e) => {
     log(`Erreur script : ${e.message}`, "#ff5c5c");
-  });
-
-  window.addEventListener('unhandledrejection', (e) => {
-    log(`Erreur non gérée : ${e.reason && e.reason.message ? e.reason.message : e.reason}`, "#ff5c5c");
   });
 
   if (typeof Chart === 'undefined') {
@@ -483,33 +482,25 @@
   }
 
   async function startLogin() {
-    try {
-      if (!window.isSecureContext || !window.crypto || !window.crypto.subtle) {
-        throw new Error("Cette page doit être ouverte en HTTPS (ou localhost) pour que la connexion sécurisée Deriv fonctionne.");
-      }
+    const state = generateRandomString(16);
+    const codeVerifier = generateRandomString(64);
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
 
-      const state = generateRandomString(16);
-      const codeVerifier = generateRandomString(64);
-      const codeChallenge = await generateCodeChallenge(codeVerifier);
+    sessionStorage.setItem('oauth_state', state);
+    sessionStorage.setItem('oauth_verifier', codeVerifier);
 
-      sessionStorage.setItem('oauth_state', state);
-      sessionStorage.setItem('oauth_verifier', codeVerifier);
+    const scope = 'read';
+    const oauthUrl = `https://auth.deriv.com/oauth2/auth` +
+      `?response_type=code` +
+      `&client_id=${CLIENT_ID}` +
+      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+      `&scope=${scope}` +
+      `&state=${state}` +
+      `&code_challenge=${codeChallenge}` +
+      `&code_challenge_method=S256`;
 
-      const scope = 'read';
-      const oauthUrl = `https://auth.deriv.com/oauth2/auth` +
-        `?response_type=code` +
-        `&client_id=${CLIENT_ID}` +
-        `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-        `&scope=${scope}` +
-        `&state=${state}` +
-        `&code_challenge=${codeChallenge}` +
-        `&code_challenge_method=S256`;
-
-      log("Redirection vers la mire d'autorisation Deriv...", "#f2b544");
-      window.location.href = oauthUrl;
-    } catch (err) {
-      log(`Impossible de démarrer la connexion : ${err.message}`, "#ff5c5c");
-    }
+    log("Redirection vers la mire d'autorisation Deriv...", "#f2b544");
+    window.location.href = oauthUrl;
   }
 
   authBtn.addEventListener('click', startLogin);
@@ -597,6 +588,8 @@
       setStatus(true, 'Connecté');
       log("Canal WebSocket établi. Chargement de l'historique...", "#20c997");
 
+      // Garde la connexion active : Deriv coupe les canaux inactifs après un délai,
+      // un ping léger toutes les 20s évite toute déconnexion pendant la consultation.
       if (keepAliveTimer) clearInterval(keepAliveTimer);
       keepAliveTimer = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -626,11 +619,14 @@
       setStatus(false, 'Déconnecté');
       if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
 
+      // Libère immédiatement toute requête en attente au lieu de la laisser expirer après 15s,
+      // pour que la logique de reprise de pagination puisse réagir tout de suite.
       Object.keys(pendingRequests).forEach(id => {
         pendingRequests[id].reject(new Error("Connexion fermée"));
         delete pendingRequests[id];
       });
 
+      // Reconnexion automatique si la coupure n'a pas été demandée (changement de compte, déconnexion volontaire)
       if (!intentionalClose && lastWsUrl && currentAccountId) {
         log("Connexion perdue, nouvelle tentative dans 3s...", "#f2b544");
         reconnectTimer = setTimeout(() => {
@@ -659,7 +655,9 @@
     });
   }
 
-  // Récupère une page de profit_table avec réessais automatiques
+  // Récupère une page de profit_table avec réessais automatiques : si la connexion tombe
+  // ou qu'une requête échoue en cours de pagination, on attend que la reconnexion se fasse
+  // puis on retente la même page au lieu d'abandonner l'historique déjà collecté.
   async function fetchProfitTablePage(offset, limit, retriesLeft = 5) {
     try {
       return await sendRequest({ profit_table: 1, description: 1, sort: 'DESC', limit, offset });
@@ -668,6 +666,7 @@
 
       log(`Page ${offset / limit + 1} : nouvelle tentative (${err.message})...`, "#f2b544");
 
+      // Attendre que le canal soit de nouveau ouvert (la reconnexion automatique peut prendre quelques secondes)
       let waited = 0;
       while ((!ws || ws.readyState !== WebSocket.OPEN) && waited < 10000) {
         await new Promise(r => setTimeout(r, 400));
@@ -678,14 +677,14 @@
     }
   }
 
-  // --- Récupération complète de l'historique (profit_table paginé, séquentiel avec réessai) ---
+  // --- Récupération complète de l'historique (profit_table paginé) ---
   async function loadFullHistory() {
     allTransactions = [];
     let offset = 0;
     const limit = 50;
     let keepGoing = true;
     let pageCount = 0;
-    const MAX_PAGES = 200;
+    const MAX_PAGES = 200; // garde-fou
 
     filterBar.style.display = 'none';
     rankingsBtn.style.display = 'none';
@@ -711,6 +710,7 @@
 
         if (keepGoing) {
           emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique... ${allTransactions.length} trades Step Index trouvés jusqu'ici</p>`;
+          // Petite pause entre chaque page pour rester loin de toute limite de débit de l'API
           await new Promise(r => setTimeout(r, 150));
         }
       }
@@ -804,7 +804,7 @@
     if (!btn) return;
     const m = btn.dataset.market;
     if (activeMarkets.has(m)) {
-      if (activeMarkets.size === 1) return;
+      if (activeMarkets.size === 1) return; // au moins un marché actif
       activeMarkets.delete(m);
       btn.classList.remove('active');
     } else {
@@ -817,6 +817,7 @@
 
   refreshBtn.addEventListener('click', loadFullHistory);
 
+  // --- Navigation entre les deux pages internes (dashboard / classements) ---
   rankingsBtn.addEventListener('click', () => {
     viewDashboard.style.display = 'none';
     viewRankings.style.display = 'block';
@@ -864,6 +865,7 @@
     document.getElementById('equity-range-label').textContent = `· ${label}`;
 
     renderCards(filtered);
+    // Chaque graphique est isolé : si l'un échoue, les autres restent affichés
     try { renderEquityChart(filtered); } catch (e) { log(`Erreur graphique performance : ${e.message}`, "#ff5c5c"); }
     try { renderWinLossChart(filtered); } catch (e) { log(`Erreur graphique gains/pertes : ${e.message}`, "#ff5c5c"); }
     try { renderMarketPLChart(filtered); } catch (e) { log(`Erreur graphique P&L marché : ${e.message}`, "#ff5c5c"); }
@@ -1073,12 +1075,13 @@
 
     let sorted;
     if (isChronological) {
+      // Simple aperçu chronologique : les jours/mois les plus récents en premier, aucun classement
       sorted = [...pool].sort((a, b) => b.key.localeCompare(a.key)).slice(0, 30);
     } else {
       sorted = [...pool].sort((a, b) => {
         if (metric === 'winrate') {
           if (b.winrate !== a.winrate) return b.winrate - a.winrate;
-          return b.trades - a.trades;
+          return b.trades - a.trades; // à winrate égal, on privilégie l'échantillon le plus significatif
         }
         return b.pl - a.pl;
       }).slice(0, 10);
@@ -1094,6 +1097,7 @@
     const maxAbs = Math.max(...sorted.map(g => Math.abs(g.pl)), 1);
 
     el.innerHTML = sorted.map((g, i) => {
+      // En mode chronologique, le montant du jour/mois est toujours ce qu'on veut voir en premier (les gains)
       const displayMetric = isChronological ? 'pl' : metric;
       const barPct = displayMetric === 'winrate' ? g.winrate : (Math.abs(g.pl) / maxAbs * 100);
       const barColor = displayMetric === 'winrate' ? (g.winrate >= 50 ? 'var(--gain)' : 'var(--loss)') : (g.pl >= 0 ? 'var(--gain)' : 'var(--loss)');
@@ -1150,20 +1154,9 @@
   // --- Initialisation système / retour OAuth ---
   async function initApp() {
     logBox.innerHTML = "";
-
-    if (!window.isSecureContext) {
-      log("⚠ Cette page n'est pas servie en HTTPS : la connexion Deriv (PKCE) exige un contexte sécurisé (https:// ou localhost).", "#ff5c5c");
-    }
-
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
     const state = urlParams.get('state');
-    const oauthError = urlParams.get('error') || urlParams.get('error_description');
-
-    if (oauthError) {
-      log(`Deriv a renvoyé une erreur d'autorisation : ${oauthError}`, "#ff5c5c");
-      window.history.replaceState({}, document.title, REDIRECT_URI);
-    }
 
     if (code && state) {
       const savedState = sessionStorage.getItem('oauth_state');
@@ -1186,10 +1179,7 @@
           })
         });
 
-        if (!resp.ok) {
-          const txt = await resp.text().catch(() => '');
-          throw new Error(`Échec du serveur d'authentification (HTTP ${resp.status})${txt ? ' : ' + txt : ''}`);
-        }
+        if (!resp.ok) throw new Error("Échec du serveur d'authentification.");
 
         const tok = await resp.json();
         if (tok.access_token) {
