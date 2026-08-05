@@ -691,11 +691,13 @@
   // --- Récupération complète de l'historique (profit_table paginé, séquentiel avec réessai) ---
   async function loadFullHistory() {
     allTransactions = [];
+    const seenContractIds = new Set(); // protège contre tout doublon en cas de re-fetch
     let offset = 0;
     const limit = 50;
-    let keepGoing = true;
     let pageCount = 0;
-    const MAX_PAGES = 200;
+    let consecutiveEmpty = 0;
+    const MAX_PAGES = 400; // garde-fou large (400 × 50 = 20 000 trades)
+    const MAX_CONSECUTIVE_EMPTY = 2; // il faut 2 pages VIDES d'affilée pour conclure à la fin de l'historique
 
     filterBar.style.display = 'none';
     rankingsBtn.style.display = 'none';
@@ -704,24 +706,38 @@
     dashboard.style.display = 'none';
 
     try {
-      while (keepGoing && pageCount < MAX_PAGES) {
-        const res = await fetchProfitTablePage(offset, limit);
+      while (pageCount < MAX_PAGES && consecutiveEmpty < MAX_CONSECUTIVE_EMPTY) {
+        let res = await fetchProfitTablePage(offset, limit);
+        let txs = (res.profit_table && res.profit_table.transactions) || [];
 
-        const txs = (res.profit_table && res.profit_table.transactions) || [];
-        for (const t of txs) {
-          const symbol = extractSymbol(t.shortcode);
-          if (symbol && STEP_MARKETS[symbol]) {
-            allTransactions.push(normalizeTransaction(t, symbol));
+        // Une page vide est reconfirmée avant d'être acceptée : un hoquet passager peut renvoyer
+        // un tableau vide alors que l'historique continue réellement plus loin.
+        if (txs.length === 0) {
+          await new Promise(r => setTimeout(r, 500));
+          const confirmRes = await fetchProfitTablePage(offset, limit);
+          txs = (confirmRes.profit_table && confirmRes.profit_table.transactions) || [];
+        }
+
+        if (txs.length === 0) {
+          consecutiveEmpty++;
+        } else {
+          consecutiveEmpty = 0;
+          for (const t of txs) {
+            if (seenContractIds.has(t.contract_id)) continue;
+            seenContractIds.add(t.contract_id);
+            const symbol = extractSymbol(t.shortcode);
+            if (symbol && STEP_MARKETS[symbol]) {
+              allTransactions.push(normalizeTransaction(t, symbol));
+            }
           }
         }
 
         pageCount++;
-        offset += limit;
-        keepGoing = txs.length === limit;
+        offset += limit; // on avance toujours — une page courte n'est jamais considérée comme la fin à elle seule
 
-        if (keepGoing) {
+        if (consecutiveEmpty < MAX_CONSECUTIVE_EMPTY) {
           emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique... ${allTransactions.length} trades Step Index trouvés jusqu'ici</p>`;
-          await new Promise(r => setTimeout(r, 150));
+          await new Promise(r => setTimeout(r, 120));
         }
       }
 
