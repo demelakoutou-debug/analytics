@@ -719,7 +719,13 @@
         }
       }
 
-      log(`Historique chargé : ${allTransactions.length} trades Step Index détectés.`, "#20c997");
+      log(`Historique chargé : ${allTransactions.length} trades Step Index détectés (${pageCount} pages).`, "#20c997");
+      if (allTransactions.length > 0) {
+        const times = allTransactions.map(t => t.purchase_time);
+        const oldest = new Date(Math.min(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+        const newest = new Date(Math.max(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+        log(`Plage couverte : du ${oldest} au ${newest}.`, "#8b93a1");
+      }
       filterBar.style.display = 'flex';
       rankingsBtn.style.display = 'inline-block';
       renderDashboard();
