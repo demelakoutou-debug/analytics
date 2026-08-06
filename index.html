@@ -670,7 +670,7 @@
   }
 
   // Récupère une page de profit_table avec réessais automatiques
-  async function fetchProfitTablePage(offset, limit, retriesLeft = 12) {
+  async function fetchProfitTablePage(offset, limit, dateFrom, dateTo, retriesLeft = 12) {
     try {
       return await sendRequest({
         profit_table: 1,
@@ -678,8 +678,8 @@
         sort: 'DESC',
         limit,
         offset,
-        date_from: 0,                          // depuis l'origine (aucune fenêtre implicite)
-        date_to: Math.floor(Date.now() / 1000)  // jusqu'à maintenant
+        date_from: dateFrom,
+        date_to: dateTo
       });
     } catch (err) {
       if (retriesLeft <= 0) throw err;
@@ -692,20 +692,17 @@
         waited += 400;
       }
       await new Promise(r => setTimeout(r, 600));
-      return fetchProfitTablePage(offset, limit, retriesLeft - 1);
+      return fetchProfitTablePage(offset, limit, dateFrom, dateTo, retriesLeft - 1);
     }
   }
 
   // --- Récupération complète de l'historique (profit_table paginé, séquentiel avec réessai) ---
   async function loadFullHistory() {
     allTransactions = [];
-    const seenContractIds = new Set(); // protège contre tout doublon en cas de re-fetch
-    let offset = 0;
+    const seenContractIds = new Set(); // protège contre tout doublon entre mois ou re-fetch
     const limit = 50;
-    let pageCount = 0;
-    let consecutiveEmpty = 0;
-    const MAX_PAGES = 400; // garde-fou large (400 × 50 = 20 000 trades)
-    const MAX_CONSECUTIVE_EMPTY = 2; // il faut 2 pages VIDES d'affilée pour conclure à la fin de l'historique
+    const MAX_PAGES_PER_MONTH = 100; // 100 × 50 = 5 000 trades/mois, largement suffisant
+    const MONTHS_TO_SCAN = 36; // 3 ans en arrière, couvre largement l'historique du compte
 
     filterBar.style.display = 'none';
     rankingsBtn.style.display = 'none';
@@ -713,23 +710,34 @@
     emptyState.style.display = 'block';
     dashboard.style.display = 'none';
 
+    // On construit la liste des mois à parcourir, du plus ancien au plus récent, chacun avec des
+    // bornes date_from / date_to fixes. Ça évite le problème du décalage ("pagination drift") qui
+    // survient avec un simple offset continu sur un compte qui continue de trader pendant le chargement :
+    // chaque mois est une fenêtre figée, donc une page courte à l'intérieur d'un mois clos veut
+    // vraiment dire "fin de ce mois", sans ambiguïté possible.
+    const months = [];
+    const cursor = new Date();
+    cursor.setDate(1);
+    cursor.setHours(0, 0, 0, 0);
+    for (let i = 0; i < MONTHS_TO_SCAN; i++) {
+      const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+      const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+      months.unshift({ from: Math.floor(monthStart.getTime() / 1000), to: Math.floor(monthEnd.getTime() / 1000), label: monthStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }) });
+      cursor.setMonth(cursor.getMonth() - 1);
+    }
+
+    let totalPages = 0;
+
     try {
-      while (pageCount < MAX_PAGES && consecutiveEmpty < MAX_CONSECUTIVE_EMPTY) {
-        let res = await fetchProfitTablePage(offset, limit);
-        let txs = (res.profit_table && res.profit_table.transactions) || [];
+      for (const month of months) {
+        let offset = 0;
+        let keepGoing = true;
+        let pagesThisMonth = 0;
 
-        // Une page vide est reconfirmée avant d'être acceptée : un hoquet passager peut renvoyer
-        // un tableau vide alors que l'historique continue réellement plus loin.
-        if (txs.length === 0) {
-          await new Promise(r => setTimeout(r, 500));
-          const confirmRes = await fetchProfitTablePage(offset, limit);
-          txs = (confirmRes.profit_table && confirmRes.profit_table.transactions) || [];
-        }
+        while (keepGoing && pagesThisMonth < MAX_PAGES_PER_MONTH) {
+          const res = await fetchProfitTablePage(offset, limit, month.from, month.to);
+          const txs = (res.profit_table && res.profit_table.transactions) || [];
 
-        if (txs.length === 0) {
-          consecutiveEmpty++;
-        } else {
-          consecutiveEmpty = 0;
           for (const t of txs) {
             if (seenContractIds.has(t.contract_id)) continue;
             seenContractIds.add(t.contract_id);
@@ -738,18 +746,21 @@
               allTransactions.push(normalizeTransaction(t, symbol));
             }
           }
+
+          pagesThisMonth++;
+          totalPages++;
+          offset += limit;
+          // Fenêtre de temps fixe : une page incomplète signifie ici, sans ambiguïté, la fin de ce mois précis.
+          keepGoing = txs.length === limit;
+
+          if (keepGoing) await new Promise(r => setTimeout(r, 100));
         }
 
-        pageCount++;
-        offset += limit; // on avance toujours — une page courte n'est jamais considérée comme la fin à elle seule
-
-        if (consecutiveEmpty < MAX_CONSECUTIVE_EMPTY) {
-          emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique... ${allTransactions.length} trades Step Index trouvés jusqu'ici</p>`;
-          await new Promise(r => setTimeout(r, 120));
-        }
+        emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de ${month.label}... ${allTransactions.length} trades Step Index trouvés jusqu'ici</p>`;
+        await new Promise(r => setTimeout(r, 80));
       }
 
-      log(`Historique chargé : ${allTransactions.length} trades Step Index détectés (${pageCount} pages).`, "#20c997");
+      log(`Historique chargé : ${allTransactions.length} trades Step Index détectés (${totalPages} pages sur ${MONTHS_TO_SCAN} mois analysés).`, "#20c997");
       if (allTransactions.length > 0) {
         const times = allTransactions.map(t => t.purchase_time);
         const oldest = new Date(Math.min(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
