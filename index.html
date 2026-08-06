@@ -683,7 +683,7 @@
   }
 
   // Récupère une page de profit_table avec réessais automatiques
-  async function fetchProfitTablePage(offset, limit, dateFrom, dateTo, retriesLeft = 12) {
+  async function fetchProfitTablePage(offset, limit, dateFrom, dateTo, retriesLeft = 12, attempt = 0) {
     try {
       return await sendRequest({
         profit_table: 1,
@@ -697,15 +697,19 @@
     } catch (err) {
       if (retriesLeft <= 0) throw err;
 
-      log(`Page ${offset / limit + 1} : nouvelle tentative (${err.message})...`, "#f2b544");
+      // Délai progressif : plus on réessaie, plus on attend (utile si l'API limite le débit de requêtes) —
+      // 1s, 1.5s, 2.25s... plafonné à 8s, au lieu d'un délai fixe qui ne laisse pas le temps à une
+      // éventuelle limitation de débit de se réinitialiser.
+      const backoff = Math.min(1000 * Math.pow(1.5, attempt), 8000);
+      log(`Page ${offset / limit + 1} : nouvelle tentative dans ${Math.round(backoff / 100) / 10}s (${err.message})...`, "#f2b544");
 
       let waited = 0;
       while ((!ws || ws.readyState !== WebSocket.OPEN) && waited < 10000) {
         await new Promise(r => setTimeout(r, 400));
         waited += 400;
       }
-      await new Promise(r => setTimeout(r, 600));
-      return fetchProfitTablePage(offset, limit, dateFrom, dateTo, retriesLeft - 1);
+      await new Promise(r => setTimeout(r, backoff));
+      return fetchProfitTablePage(offset, limit, dateFrom, dateTo, retriesLeft - 1, attempt + 1);
     }
   }
 
@@ -776,7 +780,7 @@
         }
 
         emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de ${month.label}... ${allTransactions.length} trades Step Index trouvés jusqu'ici</p>`;
-        await new Promise(r => setTimeout(r, 80));
+        await new Promise(r => setTimeout(r, 200)); // pause systématique entre chaque mois, même vide, pour rester loin de toute limite de débit
       }
 
       log(`Historique chargé : ${allTransactions.length} trades Step Index détectés (${totalPages} pages sur ${MONTHS_TO_SCAN} mois analysés).`, "#20c997");
