@@ -443,6 +443,8 @@
   let keepAliveTimer = null;
   let reconnectTimer = null;
   let intentionalClose = false;
+  let isReconnecting = false;
+  let isLoadingHistory = false;
   let currentAccountId = null;
   let daysMetric = 'pl';
   let historyIsPartial = false;
@@ -605,7 +607,6 @@
 
     ws.onopen = () => {
       setStatus(true, 'Connecté');
-      log("Canal WebSocket établi. Chargement de l'historique...", "#20c997");
 
       if (keepAliveTimer) clearInterval(keepAliveTimer);
       keepAliveTimer = setInterval(() => {
@@ -614,7 +615,18 @@
         }
       }, 20000);
 
-      loadFullHistory();
+      if (isReconnecting) {
+        // Reconnexion suite à une coupure en plein chargement : on NE relance PAS loadFullHistory
+        // depuis zéro. La boucle en cours (dans fetchProfitTablePage) attend justement que le canal
+        // redevienne OPEN pour reprendre exactement où elle en était — la relancer ici l'écraserait
+        // et effacerait la progression déjà collectée (c'était la cause du chargement qui s'arrêtait
+        // en plein milieu, par exemple pile après février 2026).
+        isReconnecting = false;
+        log("Canal WebSocket rétabli, reprise du chargement en cours...", "#20c997");
+      } else {
+        log("Canal WebSocket établi. Chargement de l'historique...", "#20c997");
+        loadFullHistory();
+      }
     };
 
     ws.onmessage = (event) => {
@@ -642,6 +654,7 @@
       });
 
       if (!intentionalClose && lastWsUrl && currentAccountId) {
+        isReconnecting = true;
         log("Connexion perdue, nouvelle tentative dans 3s...", "#f2b544");
         reconnectTimer = setTimeout(() => {
           switchAccountSession(currentAccountId);
@@ -698,6 +711,12 @@
 
   // --- Récupération complète de l'historique (profit_table paginé, séquentiel avec réessai) ---
   async function loadFullHistory() {
+    if (isLoadingHistory) {
+      log("Chargement déjà en cours, nouvelle demande ignorée.", "#8b93a1");
+      return;
+    }
+    isLoadingHistory = true;
+
     allTransactions = [];
     const seenContractIds = new Set(); // protège contre tout doublon entre mois ou re-fetch
     const limit = 50;
@@ -788,6 +807,8 @@
         emptyState.innerHTML = `<h2>Aucune donnée disponible</h2><p>Réessayez l'actualisation dans quelques instants.</p><button class="btn" id="retry-btn">↻ Réessayer</button>`;
         document.getElementById('retry-btn').addEventListener('click', loadFullHistory);
       }
+    } finally {
+      isLoadingHistory = false;
     }
   }
 
