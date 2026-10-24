@@ -3941,9 +3941,14 @@ document.getElementById('stake-input').addEventListener('change', updateDoubleLa
    on regarde si un trade vers la SMA gagne à l'expiration (H ticks, égalité = non gagnant).
    H suit la durée en ticks du panneau de trade (sinon SMAP.horizon).
 ════════════════════════════════════════════ */
-const SMAP = { enabled:true, period:100, gap:5, horizon:5 };
+const SMAP = { enabled:true, period:100, gapTicks:10, horizon:5, minCases:30 };
 let smaStats = null, smaStatsAt = 0, smaStatsKey = '';
 
+/* taille d'un tick : Step 100 = 0.1 … Step 500 = 0.5 */
+function smaTickSize(){
+    const m = marketBySymbol(currentSymbol);
+    return m ? parseInt(m.key,10)/1000 : 0.5;
+}
 function smaLive(){
     const P = ticksData.prices, n = P.length;
     if(n < SMAP.period) return null;
@@ -3954,7 +3959,7 @@ function smaLive(){
 }
 function smaProbCompute(P, N, GAP, H){
     const n = P.length;
-    if(n < N+H+50) return null;
+    if(n < N+H+2) return null;
     const sma = new Array(n).fill(null);
     let sum = 0;
     for(let i=0; i<n; i++){
@@ -3975,27 +3980,35 @@ function smaProbCompute(P, N, GAP, H){
 function updateSmaBadge(){
     const el = document.getElementById('sma-badge'); if(!el) return;
     if(!SMAP.enabled){ el.classList.remove('show'); return; }
+    const n = ticksData.prices.length;
+    if(!n){ el.classList.remove('show'); return; }
     const L = smaLive();
-    if(!L){ el.classList.remove('show'); return; }
+    if(!L){
+        el.innerHTML = '<span class="sb-lbl">SMA'+SMAP.period+'</span><span class="sb-lbl">chargement '+n+'/'+SMAP.period+' ticks</span>';
+        el.classList.remove('zone'); el.classList.add('show');
+        return;
+    }
+    const GAP = +(SMAP.gapTicks*smaTickSize()).toFixed(4);
     const dv = parseInt(document.getElementById('dur-value').value, 10);
     const H = (durType==='t' && dv>0) ? dv : SMAP.horizon;
     const key = currentSymbol+'|'+H;
     const now = Date.now();
     if(key!==smaStatsKey || now-smaStatsAt>2000){
-        smaStats = smaProbCompute(ticksData.prices, SMAP.period, SMAP.gap, H);
+        smaStats = smaProbCompute(ticksData.prices, SMAP.period, GAP, H);
         smaStatsKey = key; smaStatsAt = now;
     }
-    const g = L.gap, up = g>0, inZone = Math.abs(g) >= SMAP.gap;
+    const g = L.gap, up = g>0, inZone = Math.abs(g) >= GAP;
     let html = '<span class="sb-lbl">SMA'+SMAP.period+'</span>'
-             + '<span class="'+(up?'up':'dn')+'">'+(up?'▲ +':'▼ −')+Math.abs(g).toFixed(1)+' pts ('+(up?'+':'−')+Math.abs(L.pct).toFixed(2)+'%)</span>';
-    if(smaStats && smaStats.cases >= 20){
+             + '<span class="'+(up?'up':'dn')+'">'+(up?'▲ +':'▼ −')+Math.abs(g).toFixed(1)+' pts ('+(up?'+':'−')+Math.abs(L.pct).toFixed(2)+'%)</span>'
+             + '<span class="sb-sep"></span>';
+    if(smaStats && smaStats.cases > 0){
         const wr = 100*smaStats.win/smaStats.cases;
         const be = (typeof roiRatio==='number' && isFinite(roiRatio) && roiRatio>0) ? 100/(1+roiRatio) : 51.3;
-        html += '<span class="sb-sep"></span>'
-              + '<span class="'+(inZone?'':'dim ')+(wr>=be?'up':'dn')+'">'+(inZone ? (up?'FALL ':'RISE ') : '')+wr.toFixed(1)+'%</span>'
-              + '<span class="sb-lbl">n='+smaStats.cases+' · '+H+'t</span>';
+        const weak = smaStats.cases < SMAP.minCases;
+        html += '<span class="'+(inZone?'':'dim ')+(wr>=be?'up':'dn')+'">'+(inZone ? (up?'FALL ':'RISE ') : '')+wr.toFixed(1)+'%</span>'
+              + '<span class="sb-lbl">'+(weak?'⚠ ':'')+'n='+smaStats.cases+' · ≥'+GAP.toFixed(1)+' pts · '+H+'t</span>';
     } else {
-        html += '<span class="sb-sep"></span><span class="sb-lbl">historique insuffisant</span>';
+        html += '<span class="sb-lbl">0 épisode ≥'+GAP.toFixed(1)+' pts</span>';
     }
     el.innerHTML = html;
     el.classList.toggle('zone', inZone);
