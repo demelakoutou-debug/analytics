@@ -66,22 +66,6 @@
         .acct-row.current { background:rgba(255,255,255,.04); }
         .acct-row.acct-logout { color:var(--red); justify-content:center; border-top:1px solid var(--border); margin-top:3px; border-radius:0 0 4px 4px; }
 
-                /* ── Badge SMA : écart + probabilité de retour ── */
-        #sma-badge { position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:11; display:none; align-items:center; gap:12px;
-                     padding:6px 14px; border-radius:12px; background:rgba(12,14,22,.92); border:1px solid #2f3650;
-                     box-shadow:0 6px 18px rgba(0,0,0,.4); font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700;
-                     color:#c8cdd8; pointer-events:none; white-space:nowrap; }
-        #sma-badge.show { display:flex; }
-        #sma-badge.zone { border-color:#e6b325; }
-        #sma-badge .sb-lbl { color:#8a93ad; font-weight:600; }
-        #sma-badge .sb-sep { width:1px; height:13px; background:#3a4260; }
-        #sma-badge .up { color:#3ddc78; }
-        #sma-badge .dn { color:#ff4d6a; }
-        #sma-badge .dim { opacity:.45; }
-        @media (max-width: 900px) {
-            #sma-badge { top:auto; bottom:44px; left:8px; transform:none; font-size:10px; padding:4px 9px; gap:8px; }
-        }
-
         /* ── MAIN : graphique + panneau de trade ── */
         #main { flex:1; display:flex; min-height:0; min-width:0; overflow:hidden; }
         #chart-wrap { flex:1; display:flex; position:relative; overflow:hidden; min-width:0; min-height:0; }
@@ -488,7 +472,6 @@
         <div id="exp-pill"></div>
         <div id="trade-feedback-bar"></div>
         <div id="tl-stats"></div>
-        <div id="sma-badge"></div>
         <div id="u-loader" class="show"><img src="U-LOADING.png" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><span class="u-fallback">U</span></div>
 
         <div id="chart-tools">
@@ -2337,7 +2320,6 @@ function updateChartData(forceEnd=false){
     if(hasInd('fractal')) drawPeakLabels(); else clearPeakLabels();
     updateOscBarrier();
     if(trendlines.length)renderTrendlines();
-    updateSmaBadge();
 }
 
 /* ════════════════════════════════════════════
@@ -3933,88 +3915,6 @@ document.getElementById('stake-input').addEventListener('change', updateDoubleLa
         el.addEventListener('input',  requestROI);
     }
 });
-
-/* ════════════════════════════════════════════
-   BADGE SMA — écart live + probabilité historique de retour
-   ─────────────────────────────────────────
-   Pour chaque épisode passé où |prix − SMA| atteint GAP (première entrée dans la zone),
-   on regarde si un trade vers la SMA gagne à l'expiration (H ticks, égalité = non gagnant).
-   H suit la durée en ticks du panneau de trade (sinon SMAP.horizon).
-════════════════════════════════════════════ */
-const SMAP = { enabled:true, period:100, gapTicks:10, horizon:5, minCases:30 };
-let smaStats = null, smaStatsAt = 0, smaStatsKey = '';
-
-/* taille d'un tick : Step 100 = 0.1 … Step 500 = 0.5 */
-function smaTickSize(){
-    const m = marketBySymbol(currentSymbol);
-    return m ? parseInt(m.key,10)/1000 : 0.5;
-}
-function smaLive(){
-    const P = ticksData.prices, n = P.length;
-    if(n < SMAP.period) return null;
-    let s = 0;
-    for(let i=n-SMAP.period; i<n; i++) s += P[i];
-    const sma = s/SMAP.period, last = P[n-1];
-    return { sma, last, gap:last-sma, pct:(last-sma)/sma*100 };
-}
-function smaProbCompute(P, N, GAP, H){
-    const n = P.length;
-    if(n < N+H+2) return null;
-    const sma = new Array(n).fill(null);
-    let sum = 0;
-    for(let i=0; i<n; i++){
-        sum += P[i]; if(i>=N) sum -= P[i-N];
-        if(i>=N-1) sma[i] = sum/N;
-    }
-    let cases=0, win=0;
-    for(let i=N; i<n-H; i++){
-        const d = P[i]-sma[i];
-        if(Math.abs(d) < GAP) continue;
-        if(Math.abs(P[i-1]-sma[i-1]) >= GAP) continue;      // un seul cas par épisode
-        cases++;
-        const mv = P[i+H]-P[i];
-        if(mv !== 0 && Math.sign(mv) === -Math.sign(d)) win++;
-    }
-    return { cases, win };
-}
-function updateSmaBadge(){
-    const el = document.getElementById('sma-badge'); if(!el) return;
-    if(!SMAP.enabled){ el.classList.remove('show'); return; }
-    const n = ticksData.prices.length;
-    if(!n){ el.classList.remove('show'); return; }
-    const L = smaLive();
-    if(!L){
-        el.innerHTML = '<span class="sb-lbl">SMA'+SMAP.period+'</span><span class="sb-lbl">chargement '+n+'/'+SMAP.period+' ticks</span>';
-        el.classList.remove('zone'); el.classList.add('show');
-        return;
-    }
-    const GAP = +(SMAP.gapTicks*smaTickSize()).toFixed(4);
-    const dv = parseInt(document.getElementById('dur-value').value, 10);
-    const H = (durType==='t' && dv>0) ? dv : SMAP.horizon;
-    const key = currentSymbol+'|'+H;
-    const now = Date.now();
-    if(key!==smaStatsKey || now-smaStatsAt>2000){
-        smaStats = smaProbCompute(ticksData.prices, SMAP.period, GAP, H);
-        smaStatsKey = key; smaStatsAt = now;
-    }
-    const g = L.gap, up = g>0, inZone = Math.abs(g) >= GAP;
-    let html = '<span class="sb-lbl">SMA'+SMAP.period+'</span>'
-             + '<span class="'+(up?'up':'dn')+'">'+(up?'▲ +':'▼ −')+Math.abs(g).toFixed(1)+' pts ('+(up?'+':'−')+Math.abs(L.pct).toFixed(2)+'%)</span>'
-             + '<span class="sb-sep"></span>';
-    if(smaStats && smaStats.cases > 0){
-        const wr = 100*smaStats.win/smaStats.cases;
-        const be = (typeof roiRatio==='number' && isFinite(roiRatio) && roiRatio>0) ? 100/(1+roiRatio) : 51.3;
-        const weak = smaStats.cases < SMAP.minCases;
-        html += '<span class="'+(inZone?'':'dim ')+(wr>=be?'up':'dn')+'">'+(inZone ? (up?'FALL ':'RISE ') : '')+wr.toFixed(1)+'%</span>'
-              + '<span class="sb-lbl">'+(weak?'⚠ ':'')+'n='+smaStats.cases+' · ≥'+GAP.toFixed(1)+' pts · '+H+'t</span>';
-    } else {
-        html += '<span class="sb-lbl">0 épisode ≥'+GAP.toFixed(1)+' pts</span>';
-    }
-    el.innerHTML = html;
-    el.classList.toggle('zone', inZone);
-    el.classList.add('show');
-}
-setInterval(updateSmaBadge, 1000);
 
 async function bootUnitie(){
     loadSettings();
