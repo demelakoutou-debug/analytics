@@ -350,6 +350,22 @@
         .ind-row.muted { border-color:#2a3048; color:#6c7590; }
         .ind-row.muted > span:first-child { opacity:.55; }
 
+                /* ═════ Bandeau des écarts prix ↔ indicateurs ═════ */
+        #chart-ctrl { right:470px; pointer-events:none; }
+        #chart-ctrl .cc-wrap { pointer-events:auto; }
+        #ind-gaps { flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:8px; height:40px; overflow:hidden; }
+        .gap-chip { flex:0 0 auto; display:flex; align-items:center; gap:7px; height:30px; padding:0 11px; border-radius:15px;
+                    border:1px solid #2f3650; background:rgba(20,24,38,.88); color:#8a93ad; white-space:nowrap;
+                    font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; }
+        .gap-chip i { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+        .gap-chip .gv { font-weight:700; color:#c8cdd8; }
+        .gap-chip .gv.up { color:#18d14a; }
+        .gap-chip .gv.dn { color:#ff4d6a; }
+        @media (max-width: 900px) {
+            #chart-ctrl { right:8px; flex-wrap:wrap; }
+            #ind-gaps { flex:1 0 100%; height:auto; flex-wrap:wrap; }
+        }
+
         /* ═════ Animation du solde ═════ */
         #acct-btn .bal { transition:color .25s, text-shadow .25s; }
         #acct-btn .bal.up   { color:#18d14a; text-shadow:0 0 12px rgba(24,209,74,.55); }
@@ -416,6 +432,8 @@
         #chart-ctrl { left:230px; gap:8px; }
         .cc-btn { height:34px; font-size:12px; padding:0 10px; }
 }
+       #ind-gaps { overflow-x:auto; overflow-y:hidden; scrollbar-width:none; pointer-events:auto; }
+       #ind-gaps::-webkit-scrollbar { height:0; }
     </style>
 </head>
 <body>
@@ -463,10 +481,11 @@
                 <button class="cc-btn" id="cc-type-btn" onclick="toggleChartMenu('type',event)"><span class="cc-ico" id="cc-type-ico"></span><span id="cc-type-txt">TICKS</span><span class="cc-arrow">▼</span></button>
                 <div class="cc-menu" id="cc-type-menu"></div>
             </div>
-            <div class="cc-wrap" id="cc-tf-wrap" style="display:none">
+            <div class="cc-wrap" id="cc-tf-wrap"  style="display:none">
                 <button class="cc-btn" id="cc-tf-btn" onclick="toggleChartMenu('tf',event)"><span id="cc-tf-txt">5sec</span><span class="cc-arrow">▼</span></button>
                 <div class="cc-menu" id="cc-tf-menu"></div>
             </div>
+            <div id="ind-gaps"></div>
         </div>
 
         <div id="exp-pill"></div>
@@ -2319,6 +2338,7 @@ function updateChartData(forceEnd=false){
     updatePriceLines();
     if(hasInd('fractal')) drawPeakLabels(); else clearPeakLabels();
     updateOscBarrier();
+    renderIndGaps();
     if(trendlines.length)renderTrendlines();
 }
 
@@ -2954,6 +2974,76 @@ function scheduleChartUpdate(forceEnd){
         updateChartData(f);
     });
 }
+
+/* ════════════════════════════════════════════
+   BANDEAU DES ÉCARTS PRIX ↔ INDICATEURS (temps réel)
+   écart = prix actuel − niveau de l'indicateur (en points)
+   + : prix au-dessus   − : prix en dessous
+════════════════════════════════════════════ */
+let _gapsHTML = '';
+function gapLabel(inst){
+    const p=inst.p;
+    switch(inst.type){
+        case 'st':      return 'ST '+p.period+'×'+p.mult;
+        case 'sar':     return 'SAR '+p.step+'/'+p.max;
+        case 'ao':      return 'AO '+p.fast+'/'+p.slow;
+        case 'cel':     return 'CE '+p.period+'×'+p.mult;
+        case 'ma':      return String(p.type).toUpperCase()+' '+p.period;
+        case 'fractal': return 'Fractal '+p.period;
+    }
+    return IND_TYPES[inst.type].name;
+}
+function gapFmt(g){ return (g>1e-9?'+':(g<-1e-9?'−':''))+Math.abs(g).toFixed(2); }
+function gapCls(g){ return g>1e-9?'up':(g<-1e-9?'dn':''); }
+function gapLastValue(arr,from){
+    if(!arr) return null;
+    const lim=Math.max(0,from-1500);
+    for(let i=Math.min(from,arr.length-1);i>=lim;i--){
+        const v=arr[i];
+        if(v!=null && !isNaN(v)) return v;
+    }
+    return null;
+}
+function renderIndGaps(){
+    const el=document.getElementById('ind-gaps'); if(!el) return;
+    let html='';
+    if(chart){
+        const V=VD(), n=V.prices.length, ds=chart.data.datasets;
+        if(n && ds[0] && ds[0].data.length===n){
+            const price=V.prices[n-1];
+            const at=k=>{ const s=ds[k]; return (s && s.data) ? s.data[n-1] : null; };
+            const val=g=>'<span class="gv '+gapCls(g)+'">'+gapFmt(g)+'</span>';
+            const dash='<span class="gv">—</span>';
+            const chip=(color,label,inner,tip)=>
+                '<div class="gap-chip" title="'+tip+'"><i style="background:'+color+'"></i><span>'+label+'</span>'+inner+'</div>';
+            activeInds().forEach(inst=>{
+                if(inst.hidden || !inst.ds) return;
+                const d=inst.ds, col=indColor(inst.type, inst.v||0), label=gapLabel(inst);
+                const tip='Écart en points : prix − '+label;
+                if(inst.type==='sar' || inst.type==='ma'){
+                    const lv=at(d[0]);
+                    html+=chip(col,label, lv==null?dash:val(price-lv), tip);
+                } else if(inst.type==='st' || inst.type==='cel'){
+                    const a=at(d[0]), b=at(d[1]);
+                    const lv=(a!=null)?a:b, c=(a!=null)?col[0]:col[1];
+                    html+=chip(c,label, lv==null?dash:val(price-lv), tip);
+                } else if(inst.type==='fractal'){
+                    const u=gapLastValue(ds[d[0]].data,n-1), dn=gapLastValue(ds[d[1]].data,n-1);
+                    html+=chip(col[0],label,
+                        '<span class="gv '+(u==null?'':gapCls(price-u))+'">▲ '+(u==null?'—':gapFmt(price-u))+'</span>'+
+                        '<span class="gv '+(dn==null?'':gapCls(price-dn))+'">▼ '+(dn==null?'—':gapFmt(price-dn))+'</span>',
+                        'Écart en points : prix − dernier fractal haut / bas');
+                } else if(inst.type==='ao'){
+                    const arr=ds[d[0]].data, v=arr[n-1], pv=n>1?arr[n-2]:null;
+                    const c=(v==null || pv==null || v>=pv)?col[0]:col[1];
+                    html+=chip(c,label, v==null?dash:val(v), "Valeur de l'AO (oscillateur, pas un écart de prix)");
+                }
+            });
+        }
+    }
+    if(html!==_gapsHTML){ _gapsHTML=html; el.innerHTML=html; }
+}
+
 function updateStatDisplay(){ /* Max/Min ne sont plus affichés dans l'en-tête (lignes sur le graphique) */ }
 
 /* ════════════════════════════════════════════
@@ -3412,7 +3502,7 @@ function activateTab(id){
     setLoading('data', !ticksData.prices.length);
     if(chart){
         if(ticksData.prices.length) updateChartData(true);
-        else { chart.data.labels=[]; chart.data.datasets.forEach(d=>d.data=[]); chart.update('none'); }
+        else { chart.data.labels=[]; chart.data.datasets.forEach(d=>d.data=[]); chart.update('none'); renderIndGaps(); }
         renderTrendlines();
     }
     _lastLiveTickAt=Date.now();
