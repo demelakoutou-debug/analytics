@@ -455,6 +455,10 @@
   let historyIsPartial = false;
   let historyPartialReason = '';
   let monthsMetric = 'pl';
+  let livePollTimer = null;
+  let lastPollTime = 0;
+  let isPolling = false;
+  let lastRenderDay = '';
 
   function log(msg, color = '#7dd3a0') {
     const time = new Date().toLocaleTimeString();
@@ -732,6 +736,7 @@
     const MAX_PAGES = 40;
     const dateTo = Math.floor(Date.now() / 1000) + 60;
     let totalPages = 0;
+    lastPollTime = Math.floor(Date.now() / 1000);
 
     filterBar.style.display = 'none';
     rankingsBtn.style.display = 'none';
@@ -794,6 +799,76 @@
       }
     } finally {
       isLoadingHistory = false;
+      startLiveUpdates();
+    }
+  }
+  // --- Mise à jour en temps réel (sans rafraîchir la page) ---
+  const LIVE_POLL_MS = 20000;      // 3 requêtes/min, bien sous la limite de 30/min
+  const LIVE_LOOKBACK_S = 3600;    // on relit la dernière heure pour ne rater aucun trade clôturé
+
+  function startLiveUpdates() {
+    if (livePollTimer) clearInterval(livePollTimer);
+    lastRenderDay = dayKeyISO(new Date());
+    livePollTimer = setInterval(pollNewTrades, LIVE_POLL_MS);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && livePollTimer) pollNewTrades();
+  });
+
+  async function pollNewTrades() {
+    if (isPolling || isLoadingHistory) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (document.hidden) return;
+    isPolling = true;
+
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const from = Math.max(HISTORY_START, lastPollTime - LIVE_LOOKBACK_S);
+      const known = new Set(allTransactions.map(t => t.contract_id));
+      let added = 0;
+      let offset = 0;
+
+      for (let page = 0; page < 5; page++) {
+        const res = await sendRequest({
+          profit_table: 1,
+          description: 1,
+          sort: 'DESC',
+          limit: PAGE_SIZE,
+          offset,
+          date_from: from,
+          date_to: nowSec + 60
+        });
+        const txs = (res.profit_table && res.profit_table.transactions) || [];
+
+        for (const t of txs) {
+          if (known.has(t.contract_id)) continue;
+          known.add(t.contract_id);
+          const symbol = extractSymbol(t);
+          if (symbol && STEP_MARKETS[symbol]) {
+            allTransactions.push(normalizeTransaction(t, symbol));
+            added++;
+          }
+        }
+
+        if (txs.length < PAGE_SIZE) break;
+        offset += PAGE_SIZE;
+      }
+
+      lastPollTime = nowSec;
+
+      const today = dayKeyISO(new Date());
+      const dayChanged = today !== lastRenderDay;
+      if (added > 0 || dayChanged) {
+        lastRenderDay = today;
+        renderDashboard();
+        if (viewRankings.style.display === 'block') renderRankings();
+        if (added > 0) log(`${added} nouveau(x) trade(s) détecté(s).`, "#20c997");
+      }
+    } catch (err) {
+      // Silencieux : le prochain cycle réessaiera tout seul
+    } finally {
+      isPolling = false;
     }
   }
 
