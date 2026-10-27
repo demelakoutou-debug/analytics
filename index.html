@@ -411,6 +411,11 @@
   // Nombre minimum de trades requis pour qu'une journée entre dans le classement Winrate.
   const MIN_TRADES_FOR_WINRATE = 3;
 
+  // Date de début du chargement de l'historique (1er janvier 2026, heure locale)
+  const HISTORY_START = Math.floor(new Date(2026, 0, 1).getTime() / 1000);
+  // Taille de page : 500 est le maximum autorisé par Deriv pour profit_table
+  const PAGE_SIZE = 500;
+
   const authBtn = document.getElementById('auth-btn');
   const authBtn2 = document.getElementById('auth-btn-2');
   const logoutBtn = document.getElementById('logout-btn');
@@ -603,9 +608,10 @@
     intentionalClose = false;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 
-    ws = new WebSocket(wsUrl);
+    const socket = new WebSocket(wsUrl);
+    ws = socket;
 
-    ws.onopen = () => {
+    socket.onopen = () => {
       setStatus(true, 'Connecté');
 
       if (keepAliveTimer) clearInterval(keepAliveTimer);
@@ -629,7 +635,7 @@
       }
     };
 
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
       if (data.req_id && pendingRequests[data.req_id]) {
@@ -640,11 +646,12 @@
       }
     };
 
-    ws.onerror = () => {
+    socket.onerror = () => {
       // Silencieux : les erreurs de transport n'interrompent pas l'expérience utilisateur
     };
 
-    ws.onclose = () => {
+    socket.onclose = () => {
+      if (socket !== ws) return; // ancien socket remplacé volontairement : on ignore
       setStatus(false, 'Déconnecté');
       if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
 
@@ -683,7 +690,7 @@
   }
 
   // Récupère une page de profit_table avec réessais automatiques
-  async function fetchProfitTablePage(offset, limit, dateFrom, dateTo, retriesLeft = 12, attempt = 0) {
+  async function fetchProfitTablePage(offset, limit, dateFrom, dateTo, retriesLeft = 6, attempt = 0) {
     try {
       return await sendRequest({
         profit_table: 1,
@@ -697,14 +704,13 @@
     } catch (err) {
       if (retriesLeft <= 0) throw err;
 
-      // Délai progressif : plus on réessaie, plus on attend (utile si l'API limite le débit de requêtes) —
-      // 1s, 1.5s, 2.25s... plafonné à 8s, au lieu d'un délai fixe qui ne laisse pas le temps à une
-      // éventuelle limitation de débit de se réinitialiser.
-      const backoff = Math.min(1000 * Math.pow(1.5, attempt), 8000);
-      log(`Page ${offset / limit + 1} : nouvelle tentative dans ${Math.round(backoff / 100) / 10}s (${err.message})...`, "#f2b544");
+      // Limite Deriv : 30 requêtes profit_table par minute. Si on la touche, on attend plus longtemps.
+      const isRateLimit = /rate|limit|too many/i.test(err.message || '');
+      const backoff = isRateLimit ? 8000 : Math.min(1000 * Math.pow(1.5, attempt), 6000);
+      log(`Nouvelle tentative dans ${Math.round(backoff / 100) / 10}s (${err.message})...`, "#f2b544");
 
       let waited = 0;
-      while ((!ws || ws.readyState !== WebSocket.OPEN) && waited < 10000) {
+      while ((!ws || ws.readyState !== WebSocket.OPEN) && waited < 15000) {
         await new Promise(r => setTimeout(r, 400));
         waited += 400;
       }
@@ -713,8 +719,7 @@
     }
   }
 
-  // --- Récupération complète de l'historique (profit_table paginé, séquentiel avec réessai) ---
-  async function loadFullHistory() {
+ async function loadFullHistory() {
     if (isLoadingHistory) {
       log("Chargement déjà en cours, nouvelle demande ignorée.", "#8b93a1");
       return;
@@ -722,10 +727,11 @@
     isLoadingHistory = true;
 
     allTransactions = [];
-    const seenContractIds = new Set(); // protège contre tout doublon entre mois ou re-fetch
-    const limit = 50;
-    const MAX_PAGES_PER_MONTH = 100; // 100 × 50 = 5 000 trades/mois, largement suffisant
-    const MONTHS_TO_SCAN = 36; // 3 ans en arrière, couvre largement l'historique du compte
+    const seenContractIds = new Set();
+    const limit = PAGE_SIZE;
+    const MAX_PAGES = 40;
+    const dateTo = Math.floor(Date.now() / 1000) + 60;
+    let totalPages = 0;
 
     filterBar.style.display = 'none';
     rankingsBtn.style.display = 'none';
@@ -733,57 +739,32 @@
     emptyState.style.display = 'block';
     dashboard.style.display = 'none';
 
-    // On construit la liste des mois à parcourir, du plus ancien au plus récent, chacun avec des
-    // bornes date_from / date_to fixes. Ça évite le problème du décalage ("pagination drift") qui
-    // survient avec un simple offset continu sur un compte qui continue de trader pendant le chargement :
-    // chaque mois est une fenêtre figée, donc une page courte à l'intérieur d'un mois clos veut
-    // vraiment dire "fin de ce mois", sans ambiguïté possible.
-    const months = [];
-    const cursor = new Date();
-    cursor.setDate(1);
-    cursor.setHours(0, 0, 0, 0);
-    for (let i = 0; i < MONTHS_TO_SCAN; i++) {
-      const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
-      const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
-      months.unshift({ from: Math.floor(monthStart.getTime() / 1000), to: Math.floor(monthEnd.getTime() / 1000), label: monthStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }) });
-      cursor.setMonth(cursor.getMonth() - 1);
-    }
-
-    let totalPages = 0;
-
     try {
-      for (const month of months) {
-        let offset = 0;
-        let keepGoing = true;
-        let pagesThisMonth = 0;
+      let offset = 0;
+      let keepGoing = true;
 
-        while (keepGoing && pagesThisMonth < MAX_PAGES_PER_MONTH) {
-          const res = await fetchProfitTablePage(offset, limit, month.from, month.to);
-          const txs = (res.profit_table && res.profit_table.transactions) || [];
+      while (keepGoing && totalPages < MAX_PAGES) {
+        const res = await fetchProfitTablePage(offset, limit, HISTORY_START, dateTo);
+        const txs = (res.profit_table && res.profit_table.transactions) || [];
 
-          for (const t of txs) {
-            if (seenContractIds.has(t.contract_id)) continue;
-            seenContractIds.add(t.contract_id);
-            const symbol = extractSymbol(t.shortcode);
-            if (symbol && STEP_MARKETS[symbol]) {
-              allTransactions.push(normalizeTransaction(t, symbol));
-            }
+        for (const t of txs) {
+          if (seenContractIds.has(t.contract_id)) continue;
+          seenContractIds.add(t.contract_id);
+          const symbol = extractSymbol(t);
+          if (symbol && STEP_MARKETS[symbol]) {
+            allTransactions.push(normalizeTransaction(t, symbol));
           }
-
-          pagesThisMonth++;
-          totalPages++;
-          offset += limit;
-          // Fenêtre de temps fixe : une page incomplète signifie ici, sans ambiguïté, la fin de ce mois précis.
-          keepGoing = txs.length === limit;
-
-          if (keepGoing) await new Promise(r => setTimeout(r, 100));
         }
 
-        emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de ${month.label}... ${allTransactions.length} trades Step Index trouvés jusqu'ici</p>`;
-        await new Promise(r => setTimeout(r, 200)); // pause systématique entre chaque mois, même vide, pour rester loin de toute limite de débit
+        totalPages++;
+        offset += limit;
+        keepGoing = txs.length === limit;
+
+        emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement... ${allTransactions.length} trades Step Index trouvés (page ${totalPages})</p>`;
+        if (keepGoing) await new Promise(r => setTimeout(r, 2200));
       }
 
-      log(`Historique chargé : ${allTransactions.length} trades Step Index détectés (${totalPages} pages sur ${MONTHS_TO_SCAN} mois analysés).`, "#20c997");
+      log(`Historique chargé : ${allTransactions.length} trades Step Index détectés (${totalPages} pages depuis le 1er janvier 2026).`, "#20c997");
       if (allTransactions.length > 0) {
         const times = allTransactions.map(t => t.purchase_time);
         const oldest = new Date(Math.min(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
@@ -816,7 +797,10 @@
     }
   }
 
-  function extractSymbol(shortcode) {
+ function extractSymbol(t) {
+    if (t.underlying_symbol) return String(t.underlying_symbol).toUpperCase();
+    if (t.symbol) return String(t.symbol).toUpperCase();
+    const shortcode = t.shortcode;
     if (!shortcode) return null;
     const parts = shortcode.split('_');
     return parts.length > 1 ? parts[1].toUpperCase() : null;
