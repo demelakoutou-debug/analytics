@@ -510,10 +510,6 @@
     log("La librairie de graphiques n'a pas pu être chargée (réseau bloqué ou CDN indisponible). Les cartes chiffrées restent fonctionnelles mais les graphiques ne s'afficheront pas.", "#ff5c5c");
   }
 
-    // Format monétaire : 1,000.00 — 10,000.00 — 100,000.00
-  function fmt(n) {
-    return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
   function setStatus(online, text) {
     statusDot.className = 'status-dot' + (online ? ' on' : '');
     statusText.textContent = text;
@@ -1072,10 +1068,10 @@
     const cards = [
       { label: 'Total Trades', value: total, cls: '' },
       { label: 'Taux de réussite', value: winRate.toFixed(1) + '%', cls: winRate >= 50 ? 'gain' : 'loss' },
-      { label: 'P/L Total', value: (totalPL >= 0 ? '+' : '') + fmt(totalPL) + '$', cls: totalPL >= 0 ? 'gain' : 'loss' },
-      { label: 'Mise Moyenne', value: fmt(avgStake) + '$', cls: '' },
-      { label: 'Meilleur Trade', value: '+' + fmt(best) + '$', cls: 'gain' },
-      { label: 'Pire Trade', value: fmt(worst) + '$', cls: 'loss' }
+      { label: 'P/L Total', value: (totalPL >= 0 ? '+' : '') + totalPL.toFixed(2) + '$', cls: totalPL >= 0 ? 'gain' : 'loss' },
+      { label: 'Mise Moyenne', value: avgStake.toFixed(2) + '$', cls: '' },
+      { label: 'Meilleur Trade', value: '+' + best.toFixed(2) + '$', cls: 'gain' },
+      { label: 'Pire Trade', value: worst.toFixed(2) + '$', cls: 'loss' }
     ];
 
     document.getElementById('cards-grid').innerHTML = cards.map(c => `
@@ -1133,7 +1129,7 @@
             grid: { color: '#1c2027' },
             ticks: { color: '#8b93a1', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
           },
-          y: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1', callback: (v) => Number(v).toLocaleString('en-US') } }
+          y: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1' } }
         },
         plugins: { legend: { display: false } }
       }
@@ -1175,7 +1171,7 @@
         responsive: true, maintainAspectRatio: false,
         scales: {
           x: { grid: { display: false }, ticks: { color: '#8b93a1' } },
-          y: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1', callback: (v) => Number(v).toLocaleString('en-US') } }
+          y: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1' } }
         },
         plugins: { legend: { display: false } }
       }
@@ -1211,15 +1207,15 @@
       const durationSec = t.sell_time ? (t.sell_time - t.purchase_time) : null;
       const durationLabel = durationSec !== null ? (durationSec < 60 ? `${durationSec}s` : `${Math.round(durationSec/60)}min`) : '—';
       const plClass = t.pl >= 0 ? 'gain' : 'loss';
-      const plLabel = (t.pl >= 0 ? '+' : '') + fmt(t.pl) + '$';
+      const plLabel = (t.pl >= 0 ? '+' : '') + t.pl.toFixed(2) + '$';
       return `
         <tr>
           <td>${date}</td>
           <td>${STEP_MARKETS[t.symbol]?.label || t.symbol}</td>
           <td><span class="tag ${t.direction}">${t.direction === 'rise' ? '▲ Rise' : '▼ Fall'}</span></td>
           <td>${durationLabel}</td>
-          <td>${fmt(t.buy_price)}$</td>
-          <td>${t.sell_price !== null ? fmt(t.sell_price) + '$' : '—'}</td>
+          <td>${t.buy_price.toFixed(2)}$</td>
+          <td>${t.sell_price !== null ? t.sell_price.toFixed(2) + '$' : '—'}</td>
           <td class="pl ${plClass}">${plLabel}</td>
         </tr>
       `;
@@ -1286,9 +1282,9 @@
       const displayMetric = isChronological ? 'pl' : metric;
       const barPct = displayMetric === 'winrate' ? g.winrate : (Math.abs(g.pl) / maxAbs * 100);
       const barColor = displayMetric === 'winrate' ? (g.winrate >= 50 ? 'var(--gain)' : 'var(--loss)') : (g.pl >= 0 ? 'var(--gain)' : 'var(--loss)');
-      const mainLabel = displayMetric === 'winrate' ? g.winrate.toFixed(1) + '%' : (g.pl >= 0 ? '+' : '') + fmt(g.pl) + '$';
+      const mainLabel = displayMetric === 'winrate' ? g.winrate.toFixed(1) + '%' : (g.pl >= 0 ? '+' : '') + g.pl.toFixed(2) + '$';
       const subLabel = displayMetric === 'winrate'
-        ? `${g.trades} trades · ${(g.pl >= 0 ? '+' : '') + fmt(g.pl)}$`
+        ? `${g.trades} trades · ${(g.pl >= 0 ? '+' : '') + g.pl.toFixed(2)}$`
         : `${g.trades} trades · ${g.winrate.toFixed(1)}% winrate`;
 
       const medalClass = (!isChronological && i < 3) ? `medal-${i + 1}` : '';
@@ -1339,7 +1335,7 @@
       <div class="mh-month">${monthName}</div>
       <div class="mh-year">${now.getFullYear()}</div>
       <div class="mh-pl-label">P&amp;L</div>
-      <div class="mh-pl-value ${plCls}">${(pl >= 0 ? '+' : '') + fmt(pl)} USD</div>
+      <div class="mh-pl-value ${plCls}">${(pl >= 0 ? '+' : '') + pl.toFixed(2)} USD</div>
       <div class="mh-contracts">Contrats <b>${total}</b></div>
       <div class="mh-gl">${wins} Gains ${losses} Perte</div>
       <div class="mh-roi">R.O.I (winrate) <b>${roi.toFixed(1)}%</b></div>
