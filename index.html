@@ -1307,13 +1307,13 @@
   }
 
     // --- Bloc "Mois en cours" (affiché en grand dans le panneau Meilleurs Mois) ---
-    function renderCurrentMonth() {
+    function renderCurrentMonth(list) {
     const el = document.getElementById('month-hero');
     if (!el) return;
 
     const now = new Date();
     const curKey = monthKeyISO(now);
-    const monthTrades = allTransactions.filter(t => monthKeyISO(new Date(t.purchase_time * 1000)) === curKey);
+    const monthTrades = list.filter(t => monthKeyISO(new Date(t.purchase_time * 1000)) === curKey);
 
     const total = monthTrades.length;
     const wins = monthTrades.filter(t => t.pl > 0).length;
@@ -1352,7 +1352,7 @@
     }
 
     const filtered = allTransactions.filter(t => activeMarkets.has(t.symbol));
-    renderCurrentMonth();
+    renderCurrentMonth(filtered);
 
     const days = aggregateByKey(
       filtered,
