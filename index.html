@@ -384,6 +384,9 @@
             </thead>
             <tbody id="trades-tbody"></tbody>
           </table>
+          <div id="table-more-wrap" style="display:none;text-align:center;padding:14px;">
+            <button class="btn btn-ghost" id="table-more-btn">Afficher plus</button>
+          </div>
         </div>
       </div>
     </div>
@@ -491,6 +494,9 @@
   let lastPollTime = 0;
   let isPolling = false;
   let lastRenderDay = '';
+  let tableLimit = 300;
+  const TABLE_STEP = 300;
+  let lastTableList = [];
 
   function log(msg, color = '#7dd3a0') {
     const time = new Date().toLocaleTimeString();
@@ -976,6 +982,7 @@
     const btn = e.target.closest('button[data-range]');
     if (!btn) return;
     activeRange = btn.dataset.range;
+    tableLimit = TABLE_STEP;
     [...rangeSteps.children].forEach(b => b.classList.toggle('active', b === btn));
     renderDashboard();
   });
@@ -984,6 +991,7 @@
     const btn = e.target.closest('button[data-market]');
     if (!btn) return;
     const m = btn.dataset.market;
+    tableLimit = TABLE_STEP;
     if (activeMarkets.has(m)) {
       if (activeMarkets.size === 1) return;
       activeMarkets.delete(m);
@@ -996,7 +1004,10 @@
     if (viewRankings.style.display === 'block') renderRankings();
   });
 
-  refreshBtn.addEventListener('click', loadFullHistory);
+    document.getElementById('table-more-btn').addEventListener('click', () => {
+    tableLimit += TABLE_STEP;
+    renderTable(lastTableList);
+  });
 
   rankingsBtn.addEventListener('click', () => {
     viewDashboard.style.display = 'none';
@@ -1204,12 +1215,16 @@
     });
   }
 
-    function renderTable(list) {
-    const MAX_ROWS = 300;
+     function renderTable(list) {
+    lastTableList = list;
     const sorted = [...list].sort((a, b) => b.purchase_time - a.purchase_time);
+    const shown = Math.min(tableLimit, sorted.length);
+    const rest = sorted.length - shown;
+
     document.getElementById('table-count').textContent =
-      `${sorted.length} trades` + (sorted.length > MAX_ROWS ? ` · ${MAX_ROWS} plus récents affichés` : '');
-    document.getElementById('trades-tbody').innerHTML = sorted.slice(0, MAX_ROWS).map(t => {
+      `${sorted.length} trades` + (rest > 0 ? ` · ${shown} plus récents affichés` : '');
+
+    document.getElementById('trades-tbody').innerHTML = sorted.slice(0, shown).map(t => {
       const date = new Date(t.purchase_time * 1000).toLocaleString('fr-FR');
       const durationSec = t.sell_time ? (t.sell_time - t.purchase_time) : null;
       const durationLabel = durationSec !== null ? (durationSec < 60 ? `${durationSec}s` : `${Math.round(durationSec/60)}min`) : '—';
@@ -1227,6 +1242,15 @@
         </tr>
       `;
     }).join('');
+
+    const moreWrap = document.getElementById('table-more-wrap');
+    const moreBtn = document.getElementById('table-more-btn');
+    if (rest > 0) {
+      moreWrap.style.display = 'block';
+      moreBtn.textContent = `Afficher ${Math.min(TABLE_STEP, rest)} de plus (${rest} restants)`;
+    } else {
+      moreWrap.style.display = 'none';
+    }
   }
 
   // --- Page Classements : agrégation par jour et par mois ---
