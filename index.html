@@ -236,47 +236,6 @@
   .rank-bar{height:100%;border-radius:4px;}
   .rank-value{font-family:var(--font-mono);font-weight:700;font-size:14px;text-align:right;}
 
-  /* ---------- Panneau Mois en cours ---------- */
-  .current-month-panel{
-    background:linear-gradient(135deg,#1d2129,#14171c);
-    border:1px solid var(--brand-dim);
-    margin-bottom:16px;
-    padding:18px 20px;
-  }
-  .cm-head{
-    display:flex;align-items:center;justify-content:space-between;
-    gap:10px;flex-wrap:wrap;margin-bottom:14px;
-  }
-  .cm-title{
-    font-family:var(--font-display);font-size:14.5px;font-weight:600;
-    display:flex;align-items:center;gap:8px;
-  }
-  .cm-month{
-    font-family:var(--font-display);font-size:15px;color:var(--text-dim);
-    text-transform:capitalize;
-  }
-  .cm-live-dot{
-    width:8px;height:8px;border-radius:50%;background:var(--gain);
-    box-shadow:0 0 8px var(--gain);
-  }
-  .cm-stats{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:12px;}
-  @media (max-width:640px){.cm-stats{grid-template-columns:1fr;}}
-  .cm-stat{
-    background:var(--panel-2);border:1px solid var(--line);
-    border-radius:8px;padding:12px 14px;
-  }
-  .cm-label{
-    font-size:11px;color:var(--text-dim);text-transform:uppercase;
-    letter-spacing:0.6px;margin-bottom:6px;
-  }
-  .cm-value{font-family:var(--font-mono);font-size:22px;font-weight:700;}
-  .cm-value.big{font-size:28px;}
-  .cm-value.gain{color:var(--gain);}
-  .cm-value.loss{color:var(--loss);}
-  .cm-sub{font-size:11.5px;color:var(--text-dim);font-family:var(--font-mono);margin-top:4px;}
-  .cm-bar-wrap{height:5px;background:#1c2027;border-radius:4px;overflow:hidden;margin-top:8px;}
-  .cm-bar{height:100%;border-radius:4px;}
-
   /* ---------- Log ---------- */
   #log-box{
     background:#000;color:#7dd3a0;font-family:var(--font-mono);font-size:11.5px;
@@ -429,20 +388,8 @@
         </h3>
         <div class="subtitle" id="months-subtitle"></div>
         <div id="ranking-months-list"></div>
-           <div>
-        <div class="panel current-month-panel" id="current-month-panel"></div>
-        <div class="panel">
-          <h3>🏆 Meilleurs Mois
-            <div class="chip" id="months-metric-toggle">
-              <button data-metric="pl" class="active">Gains cumulés</button>
-              <button data-metric="winrate">Winrate</button>
-              <button data-metric="date">Date</button>
-            </div>
-          </h3>
-          <div class="subtitle" id="months-subtitle"></div>
-          <div id="ranking-months-list"></div>
-        </div>
       </div>
+    </div>
   </main>
 </div>
 
@@ -1328,50 +1275,6 @@
     return usedThreshold;
   }
 
-  function renderCurrentMonth(list) {
-    const el = document.getElementById('current-month-panel');
-    if (!el) return;
-
-    const now = new Date();
-    const key = monthKeyISO(now);
-    const monthTrades = list.filter(t => monthKeyISO(new Date(t.purchase_time * 1000)) === key);
-
-    const total = monthTrades.length;
-    const wins = monthTrades.filter(t => t.pl > 0).length;
-    const losses = total - wins;
-    const pl = monthTrades.reduce((s, t) => s + t.pl, 0);
-    const winrate = total ? (wins / total * 100) : 0;
-
-    const monthLabel = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-    const plClass = pl >= 0 ? 'gain' : 'loss';
-    const plText = (pl >= 0 ? '+' : '') + pl.toFixed(2) + '$';
-    const wrClass = winrate >= 50 ? 'gain' : 'loss';
-    const wrColor = winrate >= 50 ? 'var(--gain)' : 'var(--loss)';
-
-    el.innerHTML = `
-      <div class="cm-head">
-        <div class="cm-title"><span class="cm-live-dot"></span>Mois en cours</div>
-        <div class="cm-month">${monthLabel}</div>
-      </div>
-      <div class="cm-stats">
-        <div class="cm-stat">
-          <div class="cm-label">Profit</div>
-          <div class="cm-value big ${plClass}">${plText}</div>
-        </div>
-        <div class="cm-stat">
-          <div class="cm-label">Trades</div>
-          <div class="cm-value">${total}</div>
-          <div class="cm-sub">${wins} gagnants · ${losses} perdants</div>
-        </div>
-        <div class="cm-stat">
-          <div class="cm-label">Winrate</div>
-          <div class="cm-value ${wrClass}">${winrate.toFixed(1)}%</div>
-          <div class="cm-bar-wrap"><div class="cm-bar" style="width:${winrate}%; background:${wrColor};"></div></div>
-        </div>
-      </div>
-    `;
-  }
-
   function renderRankings() {
     const banner = document.getElementById('partial-load-banner-rankings');
     if (historyIsPartial) {
@@ -1382,7 +1285,6 @@
     }
 
     const filtered = allTransactions.filter(t => activeMarkets.has(t.symbol));
-    renderCurrentMonth(filtered);
 
     const days = aggregateByKey(
       filtered,
