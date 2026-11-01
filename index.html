@@ -267,6 +267,13 @@
     .month-hero > *{position:static;transform:none;}
   }
 
+    /* ---------- Classements cliquables ---------- */
+  #ranking-months-list .rank-row{cursor:pointer;border-radius:8px;transition:background .15s ease;}
+  #ranking-months-list .rank-row:hover{background:#181c22;}
+  #ranking-months-list .rank-row.selected{background:#1b1f26;box-shadow:inset 3px 0 0 var(--brand);}
+  .mh-tag.clickable{cursor:pointer;}
+  .mh-tag.clickable:hover{color:var(--text);}
+
   /* ---------- Log ---------- */
   #log-box{
     background:#000;color:#7dd3a0;font-family:var(--font-mono);font-size:11.5px;
@@ -494,6 +501,7 @@
   let lastPollTime = 0;
   let isPolling = false;
   let lastRenderDay = '';
+  let selectedMonthKey = null;
   let tableLimit = 300;
   const TABLE_STEP = 300;
   let lastTableList = [];
@@ -1004,6 +1012,24 @@
     if (viewRankings.style.display === 'block') renderRankings();
   });
 
+    refreshBtn.addEventListener('click', loadFullHistory);
+
+  // Clic sur un mois du classement : son historique s'affiche dans le grand bloc
+  document.getElementById('ranking-months-list').addEventListener('click', (e) => {
+    const row = e.target.closest('.rank-row[data-key]');
+    if (!row) return;
+    const key = row.dataset.key;
+    selectedMonthKey = (selectedMonthKey === key) ? null : key;
+    renderRankings();
+  });
+
+  // Clic sur « Terminé » : retour au mois en cours
+  document.getElementById('month-hero').addEventListener('click', (e) => {
+    if (!e.target.closest('.mh-tag.clickable')) return;
+    selectedMonthKey = null;
+    renderRankings();
+  });
+
     document.getElementById('table-more-btn').addEventListener('click', () => {
     tableLimit += TABLE_STEP;
     renderTable(lastTableList);
@@ -1323,7 +1349,7 @@
       const badgeClass = isChronological ? 'date-badge' : '';
 
       return `
-        <div class="rank-row ${medalClass}">
+        <div class="rank-row ${medalClass} ${g.key === selectedMonthKey ? 'selected' : ''}" data-key="${g.key}">
           <div class="rank-badge ${badgeClass}">${badgeContent}</div>
           <div>
             <div class="rank-date">${g.label}</div>
@@ -1345,7 +1371,12 @@
 
     const now = new Date();
     const curKey = monthKeyISO(now);
-    const monthTrades = list.filter(t => monthKeyISO(new Date(t.purchase_time * 1000)) === curKey);
+    const viewKey = selectedMonthKey || curKey;
+    const isCurrent = viewKey === curKey;
+    const [vy, vm] = viewKey.split('-').map(Number);
+    const viewDate = new Date(vy, vm - 1, 1);
+
+    const monthTrades = list.filter(t => monthKeyISO(new Date(t.purchase_time * 1000)) === viewKey);
 
     const total = monthTrades.length;
     const wins = monthTrades.filter(t => t.pl > 0).length;
@@ -1354,17 +1385,21 @@
     const roi = total ? (wins / total * 100) : 0;
     const usedMarkets = new Set(monthTrades.map(t => t.symbol));
 
-    const monthName = now.toLocaleDateString('fr-FR', { month: 'long' });
+    const monthName = viewDate.toLocaleDateString('fr-FR', { month: 'long' });
     const plCls = pl >= 0 ? 'gain' : 'loss';
 
     const marketsHtml = Object.keys(STEP_MARKETS).map(k =>
       `<span class="mh-mk ${usedMarkets.has(k) ? 'used' : ''}">${STEP_MARKETS[k].label}</span>`
     ).join('');
 
+    const tagHtml = isCurrent
+      ? `<div class="mh-tag">Mois en cours...</div>`
+      : `<div class="mh-tag clickable" title="Cliquer pour revenir au mois en cours">Terminé</div>`;
+
     el.innerHTML = `
-      <div class="mh-tag">Mois en cours...</div>
+      ${tagHtml}
       <div class="mh-month">${monthName}</div>
-      <div class="mh-year">${now.getFullYear()}</div>
+      <div class="mh-year">${vy}</div>
       <div class="mh-pl-label">P&amp;L</div>
       <div class="mh-pl-value ${plCls}">${(pl >= 0 ? '+' : '') + fmt(pl)} USD</div>
       <div class="mh-contracts">Contrats <b>${total}</b></div>
