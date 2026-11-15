@@ -598,7 +598,8 @@
   logoutBtn.addEventListener('click', () => {
     intentionalClose = true;
     sessionStorage.clear();
-    localStorage.clear();
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('is_logged');
     window.location.href = REDIRECT_URI;
   });
 
@@ -636,13 +637,22 @@
 
       accountSelect.style.display = 'inline-block';
 
+      // Réouvre le dernier compte utilisé (Réel ou Démo) au lieu de toujours prendre le premier
+      const savedAccount = localStorage.getItem('last_account_id');
+      if (savedAccount && accounts.some(acc => acc.account_id === savedAccount)) {
+        accountSelect.value = savedAccount;
+      }
+
       if (accountSelect.value) switchAccountSession(accountSelect.value);
     } catch (error) {
       log(`Impossible de récupérer vos comptes : ${error.message}`, "#ff5c5c");
     }
   }
 
-  accountSelect.addEventListener('change', (e) => switchAccountSession(e.target.value));
+    accountSelect.addEventListener('change', (e) => {
+    localStorage.setItem('last_account_id', e.target.value);
+    switchAccountSession(e.target.value);
+  });
 
   // --- OTP + WebSocket ---
   async function switchAccountSession(accountId) {
