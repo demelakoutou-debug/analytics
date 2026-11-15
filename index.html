@@ -287,6 +287,29 @@
   #ranking-months-list .rank-row:hover{background:#181c22;}
   #ranking-months-list .rank-row.selected{background:#1b1f26;box-shadow:inset 3px 0 0 var(--brand);}
 
+    /* ---------- Compte / solde en haut à droite ---------- */
+  #account-select, #logout-btn, #status-text{display:none !important;}
+  .brand{user-select:none;}
+  .acct-wrap{position:relative;}
+  .acct-btn{display:flex;align-items:baseline;gap:6px;background:transparent;border:none;cursor:pointer;padding:6px 4px;font-family:var(--font-display);color:var(--gold);}
+  .acct-btn.real{color:var(--gain);}
+  .acct-btn .k{font-size:13px;font-weight:500;}
+  .acct-btn .b{font-size:18px;font-weight:700;}
+  .acct-btn i{font-style:normal;font-size:9px;opacity:.8;}
+  .acct-menu{display:none;position:absolute;right:0;top:calc(100% + 8px);min-width:210px;padding:8px;background:#101318;border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.5);z-index:100;}
+  .acct-menu.open{display:block;}
+  .acct-item{padding:8px 12px;border-radius:8px;text-align:center;cursor:pointer;font-family:var(--font-display);font-size:15px;font-weight:600;}
+  .acct-item.real{color:var(--gain);}
+  .acct-item.demo{color:var(--gold);}
+  .acct-item:hover{background:#1b1f26;}
+  .acct-item.active{background:#232831;}
+  .acct-logout{margin-top:6px;padding:4px;text-align:center;font-size:11px;color:#a84a52;cursor:pointer;}
+  .acct-logout:hover{color:var(--loss);}
+
+  /* Mode XOF : montants plus longs, on ajuste la taille et la colonne des classements */
+  body.cur-xof .card .value{font-size:17px;}
+  body.cur-xof .rank-row{grid-template-columns:36px 1fr 120px 150px;}
+
   /* ---------- Log ---------- */
   #log-box{
     background:#000;color:#7dd3a0;font-family:var(--font-mono);font-size:11.5px;
@@ -311,12 +334,17 @@
       <p>Suivi de performance — Step Index 100 · 200 · 300 · 400 · 500</p>
     </div>
   </div>
-  <div class="topbar-right">
-    <div class="status-pill"><span class="status-dot" id="status-dot"></span><span id="status-text">Déconnecté</span></div>
+    <div class="topbar-right">
+    <div class="acct-wrap" id="acct-wrap" style="display:none;">
+      <button class="acct-btn" id="acct-btn" type="button"><span class="k" id="acct-kind">démo</span><span class="b" id="acct-balance">—</span><i>▾</i></button>
+      <div class="acct-menu" id="acct-menu"></div>
+    </div>
     <select id="account-select" style="display:none;"></select>
     <button id="rankings-btn" class="btn btn-ghost" style="display:none;">🏆 Classements</button>
     <button id="auth-btn" class="btn">Se connecter avec Deriv</button>
     <button id="logout-btn" class="btn btn-ghost" style="display:none;">Déconnexion</button>
+    <span class="status-dot" id="status-dot"></span>
+    <span id="status-text" style="display:none;"></span>
   </div>
 </div>
 
@@ -538,10 +566,147 @@
     log("La librairie de graphiques n'a pas pu être chargée (réseau bloqué ou CDN indisponible). Les cartes chiffrées restent fonctionnelles mais les graphiques ne s'afficheront pas.", "#ff5c5c");
   }
 
-    // Format monétaire : 1,000.00 — 10,000.00 — 100,000.00
-  function fmt(n) {
-    return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // ---------- Devise d'affichage : USD ↔ XOF (double-clic sur le logo) ----------
+  let displayCurrency = localStorage.getItem('display_currency') === 'XOF' ? 'XOF' : 'USD';
+  let baseCurrency = 'USD';      // devise réelle du compte Deriv
+  let fxRate = 595;              // XOF pour 1 USD (mis à jour automatiquement)
+  let accountInfo = {};          // comptes renvoyés par Deriv
+  let balanceValue = null;       // solde du compte actif (dans la devise du compte)
+  try {
+    const savedFx = JSON.parse(localStorage.getItem('fx_xof') || 'null');
+    if (savedFx && savedFx.rate > 0) fxRate = savedFx.rate;
+  } catch (e) {}
+
+  function activeCur() {
+    return (baseCurrency === 'USD' || baseCurrency === 'XOF') ? displayCurrency : baseCurrency;
   }
+  function conv(n) {
+    n = Number(n);
+    const cur = activeCur();
+    if (cur === baseCurrency) return n;
+    return cur === 'XOF' ? n * fxRate : n / fxRate;
+  }
+  // USD : 1,000.00 — XOF : 1 000.00 (espaces pour les milliers, point pour les centimes)
+  function fmtDisp(v) {
+    const s = Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return activeCur() === 'XOF' ? s.replace(/,/g, '\u00A0') : s;
+  }
+  function fmt(n) { return fmtDisp(conv(n)); }
+  function fmtAxis(v) {
+    const s = Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
+    return activeCur() === 'XOF' ? s.replace(/,/g, '\u00A0') : s;
+  }
+  function curSym()  { const c = activeCur(); return c === 'USD' ? '$' : (c === 'XOF' ? ' F' : ' ' + c); }
+  function curCode() { return activeCur(); }
+
+  function applyCurrencyClass() {
+    document.body.classList.toggle('cur-xof', activeCur() === 'XOF');
+  }
+
+  function refreshAfterCurrencyChange() {
+    applyCurrencyClass();
+    updateAccountUI();
+    if (allTransactions.length > 0) renderDashboard();
+    if (viewRankings.style.display === 'block') renderRankings();
+  }
+
+  // Double-clic sur le logo : bascule USD ↔ XOF (aucun bouton visible)
+  document.querySelector('.brand').addEventListener('dblclick', () => {
+    displayCurrency = displayCurrency === 'USD' ? 'XOF' : 'USD';
+    localStorage.setItem('display_currency', displayCurrency);
+    refreshAfterCurrencyChange();
+  });
+
+  // Taux USD → XOF : réutilisé 6 h, sinon récupéré en ligne (2 sources)
+  async function loadFxRate() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('fx_xof') || 'null');
+      if (saved && saved.rate > 0 && Date.now() - saved.t < 6 * 3600 * 1000) { fxRate = saved.rate; return; }
+    } catch (e) {}
+    const sources = [
+      async () => (await (await fetch('https://open.er-api.com/v6/latest/USD')).json()).rates.XOF,
+      async () => (await (await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json')).json()).usd.xof
+    ];
+    for (const get of sources) {
+      try {
+        const r = Number(await get());
+        if (r > 100 && r < 2000) {
+          fxRate = r;
+          localStorage.setItem('fx_xof', JSON.stringify({ rate: r, t: Date.now() }));
+          log(`Taux USD → XOF : ${r.toFixed(2)}`, "#8b93a1");
+          if (displayCurrency === 'XOF') refreshAfterCurrencyChange();
+          return;
+        }
+      } catch (e) {}
+    }
+    log("Taux USD → XOF indisponible, dernier taux connu utilisé.", "#f2b544");
+  }
+
+  // ---------- Solde + menu des comptes ----------
+  function updateAccountUI() {
+    const wrap = document.getElementById('acct-wrap');
+    if (!wrap || !currentAccountId) return;
+    const info = accountInfo[currentAccountId] || {};
+    const isDemo = info.account_type === 'demo';
+    const raw = balanceValue !== null ? balanceValue : (info.balance !== undefined ? Number(info.balance) : null);
+
+    document.getElementById('acct-btn').className = 'acct-btn ' + (isDemo ? 'demo' : 'real');
+    document.getElementById('acct-kind').textContent = isDemo ? 'démo' : 'réel';
+    document.getElementById('acct-balance').textContent =
+      (raw === null || isNaN(raw)) ? '—' : fmt(raw) + ' ' + curCode();
+    document.querySelectorAll('#acct-menu .acct-item').forEach(it =>
+      it.classList.toggle('active', it.dataset.id === currentAccountId));
+    wrap.style.display = 'block';
+  }
+
+  function applyBalance(b) {
+    balanceValue = Number(b.balance);
+    const curChanged = b.currency && b.currency !== baseCurrency;
+    if (b.currency) baseCurrency = b.currency;
+    if (curChanged) refreshAfterCurrencyChange(); else updateAccountUI();
+  }
+
+  function requestBalance() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ balance: 1, subscribe: 1, req_id: reqCounter++ }));
+    }
+  }
+
+  function buildAccountMenu(accounts) {
+    const items = accounts.map(acc => {
+      const isDemo = acc.account_type === 'demo';
+      const several = accounts.filter(a => (a.account_type === 'demo') === isDemo).length > 1;
+      const label = (isDemo ? 'DOT(Compte démo)' : 'ROT(Compte réel)') + (several ? ' ' + acc.account_id : '');
+      return `<div class="acct-item ${isDemo ? 'demo' : 'real'}" data-id="${acc.account_id}">${label}</div>`;
+    }).join('');
+    document.getElementById('acct-menu').innerHTML = items + `<div class="acct-logout">déconnexion</div>`;
+  }
+
+  function closeAcctMenu() {
+    document.getElementById('acct-menu').classList.remove('open');
+  }
+
+  function selectAccount(id) {
+    closeAcctMenu();
+    if (!id || id === currentAccountId) return;
+    accountSelect.value = id;
+    localStorage.setItem('last_account_id', id);
+    switchAccountSession(id);
+  }
+
+  document.getElementById('acct-btn').addEventListener('click', () => {
+    document.getElementById('acct-menu').classList.toggle('open');
+  });
+  document.getElementById('acct-menu').addEventListener('click', (e) => {
+    const item = e.target.closest('.acct-item');
+    if (item) { selectAccount(item.dataset.id); return; }
+    if (e.target.closest('.acct-logout')) { closeAcctMenu(); logoutBtn.click(); }
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#acct-wrap')) closeAcctMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAcctMenu(); });
+
+  applyCurrencyClass();
+
   function setStatus(online, text) {
     statusDot.className = 'status-dot' + (online ? ' on' : '');
     statusText.textContent = text;
@@ -636,6 +801,8 @@
       });
 
       accountSelect.style.display = 'inline-block';
+      accounts.forEach(a => { accountInfo[a.account_id] = a; });
+      buildAccountMenu(accounts);
 
       // Réouvre le dernier compte utilisé (Réel ou Démo) au lieu de toujours prendre le premier
       const savedAccount = localStorage.getItem('last_account_id');
@@ -658,7 +825,10 @@
   async function switchAccountSession(accountId) {
     intentionalClose = true;
     if (ws) { ws.close(); }
+    if (currentAccountId !== accountId) balanceValue = null;
     currentAccountId = accountId;
+    baseCurrency = (accountInfo[accountId] && accountInfo[accountId].currency) || baseCurrency;
+    updateAccountUI();
     log(`Demande d'un canal sécurisé pour le compte ${accountId}...`, "#f2b544");
 
     try {
@@ -691,6 +861,7 @@
 
     socket.onopen = () => {
       setStatus(true, 'Connecté');
+      requestBalance();
 
       if (keepAliveTimer) clearInterval(keepAliveTimer);
       keepAliveTimer = setInterval(() => {
@@ -715,6 +886,7 @@
 
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      if (data.balance && data.balance.balance !== undefined) applyBalance(data.balance);
 
       if (data.req_id && pendingRequests[data.req_id]) {
         const { resolve, reject } = pendingRequests[data.req_id];
@@ -1141,10 +1313,10 @@
     const cards = [
       { label: 'Total Trades', value: total, cls: '' },
       { label: 'Taux de réussite', value: winRate.toFixed(1) + '%', cls: winRate >= 50 ? 'gain' : 'loss' },
-      { label: 'P/L Total', value: (totalPL >= 0 ? '+' : '') + fmt(totalPL) + '$', cls: totalPL >= 0 ? 'gain' : 'loss' },
-      { label: 'Mise Moyenne', value: fmt(avgStake) + '$', cls: '' },
-      { label: 'Meilleur Trade', value: '+' + fmt(best) + '$', cls: 'gain' },
-      { label: 'Pire Trade', value: fmt(worst) + '$', cls: 'loss' }
+      { label: 'P/L Total', value: (totalPL >= 0 ? '+' : '') + fmt(totalPL) + curSym(), cls: totalPL >= 0 ? 'gain' : 'loss' },
+      { label: 'Mise Moyenne', value: fmt(avgStake) + curSym(), cls: '' },
+      { label: 'Meilleur Trade', value: '+' + fmt(best) + curSym(), cls: 'gain' },
+      { label: 'Pire Trade', value: fmt(worst) + curSym(), cls: 'loss' }
     ];
 
     document.getElementById('cards-grid').innerHTML = cards.map(c => `
@@ -1168,7 +1340,7 @@
       cum += t.pl;
             const d = new Date(t.purchase_time * 1000);
       labels.push(String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'));
-      data.push(Number(cum.toFixed(2)));
+      data.push(Number(conv(cum).toFixed(2)));
     });
 
     destroyChart('equity');
@@ -1229,7 +1401,7 @@
 
   function renderMarketPLChart(list) {
     const keys = Object.keys(STEP_MARKETS);
-    const pl = keys.map(k => list.filter(t => t.symbol === k).reduce((s, t) => s + t.pl, 0));
+    const pl = keys.map(k => conv(list.filter(t => t.symbol === k).reduce((s, t) => s + t.pl, 0)));
     destroyChart('marketpl');
     charts.marketpl = new Chart(document.getElementById('chart-market-pl'), {
       type: 'bar',
@@ -1245,7 +1417,7 @@
         responsive: true, maintainAspectRatio: false,
         scales: {
           x: { grid: { display: false }, ticks: { color: '#8b93a1' } },
-          y: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1', callback: (v) => Number(v).toLocaleString('en-US') } }
+          y: { grid: { color: '#1c2027' }, ticks: { color: '#8b93a1', callback: (v) => fmtAxis(v) } }
         },
         plugins: { legend: { display: false } }
       }
@@ -1287,15 +1459,15 @@
       const durationSec = t.sell_time ? (t.sell_time - t.purchase_time) : null;
       const durationLabel = durationSec !== null ? (durationSec < 60 ? `${durationSec}s` : `${Math.round(durationSec/60)}min`) : '—';
       const plClass = t.pl >= 0 ? 'gain' : 'loss';
-      const plLabel = (t.pl >= 0 ? '+' : '') + fmt(t.pl) + '$';
+      const plLabel = (t.pl >= 0 ? '+' : '') + fmt(t.pl) + curSym()
       return `
         <tr>
           <td>${date}</td>
           <td>${STEP_MARKETS[t.symbol]?.label || t.symbol}</td>
           <td><span class="tag ${t.direction}">${t.direction === 'rise' ? '▲ Rise' : '▼ Fall'}</span></td>
           <td>${durationLabel}</td>
-          <td>${fmt(t.buy_price)}$</td>
-          <td>${t.sell_price !== null ? fmt(t.sell_price) + '$' : '—'}</td>
+          <td>${fmt(t.buy_price)}${curSym()}</td>
+          <td>${t.sell_price !== null ? fmt(t.sell_price) + curSym() : '—'}</td>
           <td class="pl ${plClass}">${plLabel}</td>
         </tr>
       `;
@@ -1371,9 +1543,9 @@
       const displayMetric = isChronological ? 'pl' : metric;
       const barPct = displayMetric === 'winrate' ? g.winrate : (Math.abs(g.pl) / maxAbs * 100);
       const barColor = displayMetric === 'winrate' ? (g.winrate >= 50 ? 'var(--gain)' : 'var(--loss)') : (g.pl >= 0 ? 'var(--gain)' : 'var(--loss)');
-      const mainLabel = displayMetric === 'winrate' ? g.winrate.toFixed(1) + '%' : (g.pl >= 0 ? '+' : '') + fmt(g.pl) + '$';
+      const mainLabel = displayMetric === 'winrate' ? g.winrate.toFixed(1) + '%' : (g.pl >= 0 ? '+' : '') + fmt(g.pl) + curSym();
       const subLabel = displayMetric === 'winrate'
-        ? `${g.trades} trades · ${(g.pl >= 0 ? '+' : '') + fmt(g.pl)}$`
+        ? `${g.trades} trades · ${(g.pl >= 0 ? '+' : '') + fmt(g.pl)}${curSym()}`
         : `${g.trades} trades · ${g.winrate.toFixed(1)}% winrate`;
 
       const medalClass = (!isChronological && i < 3) ? `medal-${i + 1}` : '';
@@ -1447,7 +1619,7 @@
         bar = `<div class="mh-bar ${a.pl >= 0 ? 'gain' : 'loss'}" style="top:${(ZONE_H - h).toFixed(1)}px;height:${h.toFixed(1)}px;"></div>`;
       }
       const tip = a.trades
-        ? `${d} ${MONTH_ABBR[vm - 1]} : ${(a.pl >= 0 ? '+' : '') + fmt(a.pl)} USD (${a.trades} trades)`
+        ? `${d} ${MONTH_ABBR[vm - 1]} : ${(a.pl >= 0 ? '+' : '') + fmt(a.pl)} ${curCode()} (${a.trades} trades)`
         : `${d} ${MONTH_ABBR[vm - 1]} : aucun trade`;
       daysHtml += `<div class="mh-day" title="${tip}">${bar}<div class="mh-dl">${d} ${MONTH_ABBR[vm - 1]}</div></div>`;
     }
@@ -1471,7 +1643,7 @@
       <div class="mh-month">${monthName}</div>
       <div class="mh-year">${vy}</div>
       <div class="mh-pl-label">P&amp;L</div>
-      <div class="mh-pl-value ${plCls}">${(pl >= 0 ? '+' : '') + fmt(pl)} USD</div>
+      <div class="mh-pl-value ${plCls}">${(pl >= 0 ? '+' : '') + fmt(pl)} ${curCode()}</div>
       <div class="mh-contracts">Contrats <b>${total}</b></div>
       <div class="mh-chart" style="grid-template-columns:repeat(${nbCols}, 1fr) 16px;">${daysHtml}${navHtml}</div>
       <div class="mh-roi">R.O.I (winrate) <b>${roi.toFixed(1)}%</b></div>
@@ -1581,6 +1753,7 @@
     }
   }
 
+  loadFxRate();
   initApp();
 </script>
 </body>
