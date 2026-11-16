@@ -1324,6 +1324,7 @@
   backToDashboardBtn.addEventListener('click', () => {
     viewRankings.style.display = 'none';
     viewDashboard.style.display = 'block';
+    saveUIState();
   });
 
   daysMetricToggle.addEventListener('click', (e) => {
@@ -1342,8 +1343,55 @@
     renderRankings();
   });
 
+    // ---------- Mémorisation de l'interface (période, marchés, classements...) ----------
+  const UI_KEY = 'ui_state_v1';
+  let pendingView = null;
+
+  function saveUIState() {
+    try {
+      localStorage.setItem(UI_KEY, JSON.stringify({
+        range: activeRange,
+        markets: [...activeMarkets],
+        daysMetric,
+        monthsMetric,
+        month: selectedMonthKey,
+        view: (pendingView === 'rankings' || viewRankings.style.display === 'block') ? 'rankings' : 'dashboard'
+      }));
+    } catch (e) {}
+  }
+
+  // Au démarrage : on remet l'interface dans son dernier état
+  (function restoreUIState() {
+    let s = null;
+    try { s = JSON.parse(localStorage.getItem(UI_KEY) || 'null'); } catch (e) {}
+    if (!s) return;
+
+    if (typeof s.range === 'string' && rangeSteps.querySelector(`[data-range="${s.range}"]`)) {
+      activeRange = s.range;
+      [...rangeSteps.children].forEach(b => b.classList.toggle('active', b.dataset.range === activeRange));
+    }
+    if (Array.isArray(s.markets)) {
+      const valid = s.markets.filter(m => STEP_MARKETS[m]);
+      if (valid.length > 0) {
+        activeMarkets = new Set(valid);
+        [...marketChips.children].forEach(b => b.classList.toggle('active', activeMarkets.has(b.dataset.market)));
+      }
+    }
+    if (['pl', 'winrate', 'date'].includes(s.daysMetric)) {
+      daysMetric = s.daysMetric;
+      [...daysMetricToggle.children].forEach(b => b.classList.toggle('active', b.dataset.metric === daysMetric));
+    }
+    if (['pl', 'winrate', 'date'].includes(s.monthsMetric)) {
+      monthsMetric = s.monthsMetric;
+      [...monthsMetricToggle.children].forEach(b => b.classList.toggle('active', b.dataset.metric === monthsMetric));
+    }
+    if (typeof s.month === 'string' && /^\d{4}-\d{2}$/.test(s.month)) selectedMonthKey = s.month;
+    if (s.view === 'rankings') pendingView = 'rankings';
+  })();
+
   // --- Rendu du dashboard ---
   function renderDashboard() {
+    saveUIState();
     if (allTransactions.length === 0) {
       emptyState.innerHTML = `<h2>Aucun trade Step Index trouvé</h2><p>Aucune transaction sur Step 100 à 500 n'a été détectée sur ce compte.</p>`;
       emptyState.style.display = 'block';
@@ -1375,6 +1423,7 @@
     try { renderMarketPLChart(filtered); } catch (e) { log(`Erreur graphique P&L marché : ${e.message}`, "#ff5c5c"); }
     try { renderMarketVolChart(filtered); } catch (e) { log(`Erreur graphique volume : ${e.message}`, "#ff5c5c"); }
     renderTable(filtered);
+    if (pendingView === 'rankings') { pendingView = null; rankingsBtn.click(); }
   }
 
   function renderCards(list) {
@@ -1729,6 +1778,7 @@
   }
 
   function renderRankings() {
+    saveUIState();
     const banner = document.getElementById('partial-load-banner-rankings');
     if (historyIsPartial) {
       banner.style.display = 'block';
