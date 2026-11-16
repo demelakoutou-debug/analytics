@@ -969,33 +969,97 @@
     }
   }
 
- async function loadFullHistory() {
+   // ---------- Cache local des trades (un cache par compte) ----------
+  const CACHE_VERSION = 1;
+  const CACHE_OVERLAP_S = 86400;   // à chaque ouverture on relit les dernières 24 h pour ne rater aucun trade
+  const MARKET_KEYS = Object.keys(STEP_MARKETS);
+
+  function cacheKey(accountId) { return 'trades_cache_v' + CACHE_VERSION + '_' + accountId; }
+
+  function saveTradesCache(accountId, syncedAt) {
+    if (!accountId) return;
+    try {
+      const rows = allTransactions.map(t => [
+        t.contract_id, MARKET_KEYS.indexOf(t.symbol), t.purchase_time, t.sell_time || 0,
+        t.buy_price, t.sell_price, t.payout, t.direction === 'rise' ? 1 : 0
+      ]);
+      localStorage.setItem(cacheKey(accountId), JSON.stringify({ v: CACHE_VERSION, syncedAt, rows }));
+    } catch (e) {
+      log("Cache local non enregistré : " + e.message, "#f2b544");
+    }
+  }
+
+  function loadTradesCache(accountId) {
+    try {
+      const raw = localStorage.getItem(cacheKey(accountId));
+      if (!raw) return null;
+      const c = JSON.parse(raw);
+      if (!c || c.v !== CACHE_VERSION || !Array.isArray(c.rows)) return null;
+      const trades = c.rows.map(r => ({
+        contract_id: r[0],
+        symbol: MARKET_KEYS[r[1]],
+        purchase_time: r[2],
+        sell_time: r[3] || null,
+        buy_price: r[4],
+        sell_price: r[5],
+        payout: r[6],
+        pl: r[5] !== null ? r[5] - r[4] : 0,
+        direction: r[7] === 1 ? 'rise' : 'fall',
+        longcode: ''
+      })).filter(t => t.symbol);
+      return { trades, syncedAt: c.syncedAt || 0 };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function loadFullHistory(forceFull = false) {
     if (isLoadingHistory) {
       log("Chargement déjà en cours, nouvelle demande ignorée.", "#8b93a1");
       return;
     }
     isLoadingHistory = true;
 
-    allTransactions = [];
-    const seenContractIds = new Set();
+    const accountId = currentAccountId;
+    const syncStart = Math.floor(Date.now() / 1000);   // début de cette synchronisation
     const limit = PAGE_SIZE;
     const MAX_PAGES = 40;
-    const dateTo = Math.floor(Date.now() / 1000) + 60;
+    const dateTo = syncStart + 60;
+    const seenContractIds = new Set();
     let totalPages = 0;
-    lastPollTime = Math.floor(Date.now() / 1000);
+    let added = 0;
+    let dateFrom = HISTORY_START;
+    lastPollTime = syncStart;
 
-    filterBar.style.display = 'none';
-    rankingsBtn.style.display = 'none';
-    emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique de trades...</p>`;
-    emptyState.style.display = 'block';
-    dashboard.style.display = 'none';
+    // Les boutons Actualiser / Réessayer passent un événement (donc forceFull est vrai) : rechargement complet
+    const cached = forceFull ? null : loadTradesCache(accountId);
+    allTransactions = [];
+
+    if (cached && cached.trades.length > 0) {
+      // Affichage immédiat depuis la mémoire locale, puis recherche des nouveaux trades seulement
+      allTransactions = cached.trades;
+      allTransactions.forEach(t => seenContractIds.add(t.contract_id));
+      dateFrom = Math.max(HISTORY_START, cached.syncedAt - CACHE_OVERLAP_S);
+      log(`${allTransactions.length} trades chargés depuis la mémoire locale, recherche des nouveaux trades...`, "#20c997");
+      historyIsPartial = false;
+      historyPartialReason = '';
+      filterBar.style.display = 'flex';
+      rankingsBtn.style.display = 'inline-block';
+      renderDashboard();
+    } else {
+      filterBar.style.display = 'none';
+      rankingsBtn.style.display = 'none';
+      emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique de trades...</p>`;
+      emptyState.style.display = 'block';
+      dashboard.style.display = 'none';
+    }
 
     try {
       let offset = 0;
       let keepGoing = true;
 
       while (keepGoing && totalPages < MAX_PAGES) {
-        const res = await fetchProfitTablePage(offset, limit, HISTORY_START, dateTo);
+        const res = await fetchProfitTablePage(offset, limit, dateFrom, dateTo);
         const txs = (res.profit_table && res.profit_table.transactions) || [];
 
         for (const t of txs) {
@@ -1004,6 +1068,7 @@
           const symbol = extractSymbol(t);
           if (symbol && STEP_MARKETS[symbol]) {
             allTransactions.push(normalizeTransaction(t, symbol));
+            added++;
           }
         }
 
@@ -1011,11 +1076,17 @@
         offset += limit;
         keepGoing = txs.length === limit;
 
-        emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement... ${allTransactions.length} trades Step Index trouvés (page ${totalPages})</p>`;
+        if (!cached) {
+          emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement... ${allTransactions.length} trades Step Index trouvés (page ${totalPages})</p>`;
+        }
         if (keepGoing) await new Promise(r => setTimeout(r, 2200));
       }
 
-      log(`Historique chargé : ${allTransactions.length} trades Step Index détectés (${totalPages} pages depuis le 1er janvier 2026).`, "#20c997");
+      if (cached) {
+        log(`Synchronisation terminée : ${added} nouveau(x) trade(s), ${allTransactions.length} au total.`, "#20c997");
+      } else {
+        log(`Historique chargé : ${allTransactions.length} trades Step Index détectés (${totalPages} pages depuis le 1er janvier 2026).`, "#20c997");
+      }
       if (allTransactions.length > 0) {
         const times = allTransactions.map(t => t.purchase_time);
         const oldest = new Date(Math.min(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
@@ -1026,7 +1097,11 @@
       historyPartialReason = '';
       filterBar.style.display = 'flex';
       rankingsBtn.style.display = 'inline-block';
-      renderDashboard();
+      if (!cached || added > 0) renderDashboard();
+      if (added > 0 && viewRankings.style.display === 'block') renderRankings();
+
+      // Cache enregistré seulement si le chargement est complet (jamais après une coupure)
+      if (allTransactions.length > 0 && accountId === currentAccountId) saveTradesCache(accountId, syncStart);
     } catch (error) {
       log(`Chargement partiel de l'historique : ${error.message}`, "#f2b544");
       historyIsPartial = true;
@@ -1102,6 +1177,7 @@
       }
 
       lastPollTime = nowSec;
+      if (added > 0) saveTradesCache(currentAccountId, nowSec);
 
       const today = dayKeyISO(new Date());
       const dayChanged = today !== lastRenderDay;
