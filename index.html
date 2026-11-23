@@ -971,7 +971,7 @@
 
    // ---------- Cache local des trades (un cache par compte) ----------
   const CACHE_VERSION = 1;
-  const CACHE_OVERLAP_S = 86400;   // à chaque ouverture on relit les dernières 24 h pour ne rater aucun trade
+  const CACHE_OVERLAP_S = 3 * 86400;   // à chaque ouverture on relit les dernières 24 h pour ne rater aucun trade
   const MARKET_KEYS = Object.keys(STEP_MARKETS);
 
   function cacheKey(accountId) { return 'trades_cache_v' + CACHE_VERSION + '_' + accountId; }
@@ -1013,7 +1013,7 @@
     }
   }
 
-  async function loadFullHistory(forceFull = false) {
+    async function loadFullHistory(forceFull = false) {
     if (isLoadingHistory) {
       log("Chargement déjà en cours, nouvelle demande ignorée.", "#8b93a1");
       return;
@@ -1021,46 +1021,65 @@
     isLoadingHistory = true;
 
     const accountId = currentAccountId;
-    const syncStart = Math.floor(Date.now() / 1000);   // début de cette synchronisation
     const limit = PAGE_SIZE;
     const MAX_PAGES = 40;
-    const dateTo = syncStart + 60;
     const seenContractIds = new Set();
+    const skippedSymbols = {};
     let totalPages = 0;
     let added = 0;
+    let apiCount = 0;
     let dateFrom = HISTORY_START;
-    lastPollTime = syncStart;
-
-    // Les boutons Actualiser / Réessayer passent un événement (donc forceFull est vrai) : rechargement complet
-    const cached = forceFull ? null : loadTradesCache(accountId);
-    allTransactions = [];
-
-    if (cached && cached.trades.length > 0) {
-      // Affichage immédiat depuis la mémoire locale, puis recherche des nouveaux trades seulement
-      allTransactions = cached.trades;
-      allTransactions.forEach(t => seenContractIds.add(t.contract_id));
-      dateFrom = Math.max(HISTORY_START, cached.syncedAt - CACHE_OVERLAP_S);
-      log(`${allTransactions.length} trades chargés depuis la mémoire locale, recherche des nouveaux trades...`, "#20c997");
-      historyIsPartial = false;
-      historyPartialReason = '';
-      filterBar.style.display = 'flex';
-      rankingsBtn.style.display = 'inline-block';
-      renderDashboard();
-    } else {
-      filterBar.style.display = 'none';
-      rankingsBtn.style.display = 'none';
-      emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique de trades...</p>`;
-      emptyState.style.display = 'block';
-      dashboard.style.display = 'none';
-    }
+    let cached = null;
+    let syncStart = Math.floor(Date.now() / 1000);
 
     try {
+      // Heure officielle de Deriv : une horloge de PC décalée ne peut plus masquer les trades récents
+      const pcNow = syncStart;
+      let serverNow = pcNow;
+      try {
+        const tr = await Promise.race([
+          sendRequest({ time: 1 }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))
+        ]);
+        if (tr && Number(tr.time) > 0) serverNow = Number(tr.time);
+      } catch (e) {}
+      if (Math.abs(serverNow - pcNow) > 30) {
+        log(`⚠ L'horloge de ton PC est ${pcNow > serverNow ? 'en avance' : 'en retard'} de ${Math.abs(pcNow - serverNow)}s sur Deriv.`, "#f2b544");
+      }
+      syncStart = Math.min(pcNow, serverNow);
+      const dateTo = Math.max(pcNow, serverNow) + 3600;
+      lastPollTime = syncStart;
+
+      // Cache local : affichage immédiat, puis recherche des nouveaux trades seulement
+      cached = forceFull ? null : loadTradesCache(accountId);
+      allTransactions = [];
+
+      if (cached && cached.trades.length > 0) {
+        allTransactions = cached.trades;
+        allTransactions.forEach(t => seenContractIds.add(t.contract_id));
+        dateFrom = Math.max(HISTORY_START, cached.syncedAt - CACHE_OVERLAP_S);
+        log(`${allTransactions.length} trades chargés depuis la mémoire locale, recherche des nouveaux trades...`, "#20c997");
+        historyIsPartial = false;
+        historyPartialReason = '';
+        filterBar.style.display = 'flex';
+        rankingsBtn.style.display = 'inline-block';
+        renderDashboard();
+      } else {
+        cached = null;
+        filterBar.style.display = 'none';
+        rankingsBtn.style.display = 'none';
+        emptyState.innerHTML = `<div class="loader" style="width:22px;height:22px;"></div><p style="margin-top:16px;">Chargement de votre historique de trades...</p>`;
+        emptyState.style.display = 'block';
+        dashboard.style.display = 'none';
+      }
+
       let offset = 0;
       let keepGoing = true;
 
       while (keepGoing && totalPages < MAX_PAGES) {
         const res = await fetchProfitTablePage(offset, limit, dateFrom, dateTo);
         const txs = (res.profit_table && res.profit_table.transactions) || [];
+        apiCount += txs.length;
 
         for (const t of txs) {
           if (seenContractIds.has(t.contract_id)) continue;
@@ -1069,6 +1088,9 @@
           if (symbol && STEP_MARKETS[symbol]) {
             allTransactions.push(normalizeTransaction(t, symbol));
             added++;
+          } else {
+            const k = symbol || '(vide)';
+            skippedSymbols[k] = (skippedSymbols[k] || 0) + 1;
           }
         }
 
@@ -1082,6 +1104,13 @@
         if (keepGoing) await new Promise(r => setTimeout(r, 2200));
       }
 
+      // Journal de diagnostic
+      log(`Deriv a renvoyé ${apiCount} trade(s) depuis le ${new Date(dateFrom * 1000).toLocaleString('fr-FR')} : ${added} nouveau(x).`, "#8b93a1");
+      const skippedKeys = Object.keys(skippedSymbols);
+      if (skippedKeys.length > 0) {
+        log(`Ignorés (marché hors Step Index) : ${skippedKeys.map(k => k + ' ×' + skippedSymbols[k]).join(', ')}`, "#f2b544");
+      }
+
       if (cached) {
         log(`Synchronisation terminée : ${added} nouveau(x) trade(s), ${allTransactions.length} au total.`, "#20c997");
       } else {
@@ -1090,7 +1119,7 @@
       if (allTransactions.length > 0) {
         const times = allTransactions.map(t => t.purchase_time);
         const oldest = new Date(Math.min(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
-        const newest = new Date(Math.max(...times) * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+        const newest = new Date(Math.max(...times) * 1000).toLocaleString('fr-FR');
         log(`Plage couverte : du ${oldest} au ${newest}.`, "#8b93a1");
       }
       historyIsPartial = false;
@@ -1158,7 +1187,7 @@
           limit: PAGE_SIZE,
           offset,
           date_from: from,
-          date_to: nowSec + 60
+          date_to: nowSec + 3600
         });
         const txs = (res.profit_table && res.profit_table.transactions) || [];
 
@@ -1417,12 +1446,12 @@
       banner.style.display = 'none';
     }
 
-    renderCards(filtered);
+    try { renderCards(filtered); } catch (e) { log(`Erreur cartes : ${e.message}`, "#ff5c5c"); }
     try { renderEquityChart(filtered); } catch (e) { log(`Erreur graphique performance : ${e.message}`, "#ff5c5c"); }
     try { renderWinLossChart(filtered); } catch (e) { log(`Erreur graphique gains/pertes : ${e.message}`, "#ff5c5c"); }
     try { renderMarketPLChart(filtered); } catch (e) { log(`Erreur graphique P&L marché : ${e.message}`, "#ff5c5c"); }
     try { renderMarketVolChart(filtered); } catch (e) { log(`Erreur graphique volume : ${e.message}`, "#ff5c5c"); }
-    renderTable(filtered);
+    try { renderTable(filtered); } catch (e) { log(`Erreur tableau : ${e.message}`, "#ff5c5c"); }
     if (pendingView === 'rankings') { pendingView = null; rankingsBtn.click(); }
   }
 
